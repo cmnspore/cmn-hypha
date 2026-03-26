@@ -1,0 +1,54 @@
+[package]
+name = "cmn-hypha"
+version = "0.1.1"
+edition = "2021"
+description = "CMN CLI tool — spawn, grow, release, taste, bond, and absorb spores on the Code Mycelial Network"
+license = "MIT"
+repository = "https://github.com/cmnspore/cmn-hypha"
+readme = "README.md"
+keywords = ["cmn", "package-manager", "code-distribution", "sovereign"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "hypha"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hypha"
+path = "src/main.rs"
+
+[dependencies]
+cmn-substrate = { version = "0.1", path = "../cmn-substrate", features = ["client-safe-dns", "archive-zstd"] }
+agent-first-data = { version = "0.7", features = ["cli-help", "cli-help-markdown"] }
+clap = { version = "4.6", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+anyhow = "1.0"
+thiserror = "2"
+walkdir = "2.5"
+ed25519-dalek = { version = "2.2", features = ["pkcs8", "pem", "zeroize"] }
+zeroize = "1"
+rand = "0.10"
+bs58 = "0.5"
+dirs = "6.0"
+tar = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tiny_http = "0.12"
+unicode-normalization = "0.1"
+tempfile = "3.27"
+ignore = "0.4"  # gitignore-compatible file matching (from ripgrep)
+toml = "1.1"
+fs2 = "0.4"
+
+[dev-dependencies]
+tempfile = "3.27"
+tar = "0.4"
+zstd = "0.13"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+print_stdout = "deny"
+print_stderr = "deny"

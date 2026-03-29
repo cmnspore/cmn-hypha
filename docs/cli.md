@@ -2,7 +2,7 @@
 
 # Hypha CLI Reference
 
-> Regenerate with `./scripts/generate-cli-doc.sh`.
+> Regenerate with `hypha --help-markdown`.
 
 # Command-Line Help for `hypha`
 

@@ -48,7 +48,7 @@ async fn lineage_direction(
     _sink: &dyn crate::EventSink,
 ) -> Result<crate::output::BondsOutput, crate::HyphaError> {
     let resolved = crate::config::resolve_synapse(synapse_arg, synapse_token_secret)
-        .map_err(|e| crate::HyphaError::new("synapse_error", e))?;
+        .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
 
     let uri = CmnUri::parse(uri_str).map_err(|e| crate::HyphaError::new("invalid_uri", e))?;
 

@@ -71,8 +71,10 @@ fn load_draft() -> Result<(std::path::PathBuf, SporeCore), (String, String)> {
     Ok((spore_core_path, draft))
 }
 
-fn save_draft(path: &Path, draft: &SporeCore) -> Result<(), String> {
-    let value = serde_json::to_value(draft).map_err(|e| format!("serialize error: {}", e))?;
+fn save_draft(path: &Path, draft: &SporeCore) -> Result<(), crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
+    let value = serde_json::to_value(draft)
+        .map_err(|e| HyphaError::new("spore_write_failed", format!("serialize error: {}", e)))?;
     write_spore_core(path, &value)
 }
 
@@ -81,7 +83,10 @@ fn save_draft(path: &Path, draft: &SporeCore) -> Result<(), String> {
 ///
 /// Ensures `$schema` is present, validates against the spore-core schema,
 /// then delegates key ordering to substrate's `format_spore_core_draft`.
-pub fn write_spore_core(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+pub fn write_spore_core(
+    path: &Path,
+    value: &serde_json::Value,
+) -> Result<(), crate::sink::HyphaError> {
     #[derive(Serialize, Deserialize)]
     struct RawSporeCoreDocument {
         #[serde(rename = "$schema", default)]
@@ -97,31 +102,50 @@ pub fn write_spore_core(path: &Path, value: &serde_json::Value) -> Result<(), St
         obj.remove("size_bytes");
     }
 
+    use crate::sink::HyphaError;
+
     // Ensure canonical schema URL is present and strict.
-    let mut raw: RawSporeCoreDocument =
-        serde_json::from_value(clean_value).map_err(|e| format!("serialize error: {}", e))?;
+    let mut raw: RawSporeCoreDocument = serde_json::from_value(clean_value)
+        .map_err(|e| HyphaError::new("spore_write_failed", format!("serialize error: {}", e)))?;
     if raw.schema.is_empty() {
         raw.schema = SPORE_CORE_SCHEMA.to_string();
     } else if raw.schema != SPORE_CORE_SCHEMA {
-        return Err(format!(
-            "spore.core.json $schema must be {}",
-            SPORE_CORE_SCHEMA
+        return Err(HyphaError::new(
+            "spore_write_failed",
+            format!("spore.core.json $schema must be {}", SPORE_CORE_SCHEMA),
         ));
     }
-    let with_schema = serde_json::to_value(&raw).map_err(|e| format!("serialize error: {}", e))?;
+    let with_schema = serde_json::to_value(&raw)
+        .map_err(|e| HyphaError::new("spore_write_failed", format!("serialize error: {}", e)))?;
 
-    let schema_type = substrate::validate_schema(&with_schema)
-        .map_err(|e| format!("spore.core.json schema validation failed: {}", e))?;
+    let schema_type = substrate::validate_schema(&with_schema).map_err(|e| {
+        HyphaError::new(
+            "schema_error",
+            format!("spore.core.json schema validation failed: {}", e),
+        )
+    })?;
     if schema_type != substrate::SchemaType::SporeCore {
-        return Err(format!(
-            "spore.core.json must validate as spore-core schema (got {:?})",
-            schema_type
+        return Err(HyphaError::new(
+            "schema_error",
+            format!(
+                "spore.core.json must validate as spore-core schema (got {:?})",
+                schema_type
+            ),
         ));
     }
 
-    let pretty = substrate::format_spore_core_draft(&with_schema)
-        .map_err(|e| format!("Failed to format spore.core.json: {}", e))?;
-    std::fs::write(path, &pretty).map_err(|e| format!("Failed to write spore.core.json: {}", e))?;
+    let pretty = substrate::format_spore_core_draft(&with_schema).map_err(|e| {
+        HyphaError::new(
+            "spore_write_failed",
+            format!("Failed to format spore.core.json: {}", e),
+        )
+    })?;
+    std::fs::write(path, &pretty).map_err(|e| {
+        HyphaError::new(
+            "spore_write_failed",
+            format!("Failed to write spore.core.json: {}", e),
+        )
+    })?;
     Ok(())
 }
 
@@ -182,6 +206,6 @@ mod tests {
         });
 
         let err = write_spore_core(&path, &value).unwrap_err();
-        assert!(err.contains("spore.core.json $schema must be"));
+        assert!(err.message.contains("spore.core.json $schema must be"));
     }
 }

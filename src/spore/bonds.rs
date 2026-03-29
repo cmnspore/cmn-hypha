@@ -92,7 +92,7 @@ pub fn handle_bond_set(
     }
 
     if let Err(e) = save_draft(&spore_core_path, &draft) {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     out.ok(&draft)
@@ -128,7 +128,7 @@ pub fn handle_bond_remove(
     });
 
     if let Err(e) = save_draft(&spore_core_path, &draft) {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     out.ok(&draft)
@@ -143,7 +143,7 @@ pub fn handle_bond_clear(out: &Output) -> ExitCode {
     draft.bonds.clear();
 
     if let Err(e) = save_draft(&spore_core_path, &draft) {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     out.ok(&draft)

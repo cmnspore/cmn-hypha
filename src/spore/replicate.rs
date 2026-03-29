@@ -21,7 +21,7 @@ pub async fn handle_replicate(
 
     if site_path.is_none() {
         if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error("invalid_domain", &e);
+            return out.error_hypha(&e);
         }
     }
 
@@ -325,27 +325,41 @@ pub async fn handle_replicate(
 }
 
 /// Download a file to a specific path
-async fn download_file_to_path(url: &str, dest: &std::path::Path) -> Result<(), String> {
+async fn download_file_to_path(
+    url: &str,
+    dest: &std::path::Path,
+) -> Result<(), crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
     let max_download_bytes = crate::cache::CacheDir::new().max_download_bytes;
 
-    let client = substrate::client::http_client(300)
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    let client = substrate::client::http_client(300).map_err(|e| {
+        HyphaError::new(
+            "fetch_failed",
+            format!("Failed to create HTTP client: {}", e),
+        )
+    })?;
 
     let response = client
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("Failed to download: {}", e))?;
+        .map_err(|e| HyphaError::new("fetch_failed", format!("Failed to download: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(HyphaError::new(
+            "fetch_failed",
+            format!("HTTP {}", response.status()),
+        ));
     }
 
     if let Some(cl) = response.content_length() {
         if cl > max_download_bytes {
-            return Err(format!(
-                "Response too large: {} bytes exceeds max_download_bytes ({})",
-                cl, max_download_bytes
+            return Err(HyphaError::new(
+                "fetch_failed",
+                format!(
+                    "Response too large: {} bytes exceeds max_download_bytes ({})",
+                    cl, max_download_bytes
+                ),
             ));
         }
     }
@@ -353,27 +367,30 @@ async fn download_file_to_path(url: &str, dest: &std::path::Path) -> Result<(), 
     let bytes = response
         .bytes()
         .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
+        .map_err(|e| HyphaError::new("fetch_failed", format!("Failed to read response: {}", e)))?;
     if bytes.len() as u64 > max_download_bytes {
-        return Err(format!(
-            "Download exceeds max_download_bytes ({})",
-            max_download_bytes
+        return Err(HyphaError::new(
+            "fetch_failed",
+            format!(
+                "Download exceeds max_download_bytes ({})",
+                max_download_bytes
+            ),
         ));
     }
 
     let dest = dest.to_path_buf();
     tokio::task::spawn_blocking(move || {
         use std::io::Write;
-        let mut out =
-            std::fs::File::create(&dest).map_err(|e| format!("Failed to create file: {}", e))?;
+        let mut out = std::fs::File::create(&dest)
+            .map_err(|e| HyphaError::new("write_error", format!("Failed to create file: {}", e)))?;
         out.write_all(&bytes)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| HyphaError::new("write_error", format!("Failed to write file: {}", e)))?;
         out.sync_all()
-            .map_err(|e| format!("Failed to sync file: {}", e))?;
-        Ok::<(), String>(())
+            .map_err(|e| HyphaError::new("write_error", format!("Failed to sync file: {}", e)))?;
+        Ok::<(), HyphaError>(())
     })
     .await
-    .map_err(|e| format!("Write task failed: {}", e))??;
+    .map_err(|e| HyphaError::new("write_error", format!("Write task failed: {}", e)))??;
 
     Ok(())
 }

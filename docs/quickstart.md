@@ -1,7 +1,5 @@
 # Quick Start
 
-New to CMN? Read [Concepts](concepts/) first for an overview of key terms and the trust model.
-
 Get started with CMN in under 5 minutes.
 
 ## Prerequisites

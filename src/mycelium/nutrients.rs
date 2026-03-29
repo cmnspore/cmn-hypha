@@ -17,7 +17,7 @@ pub fn handle_nutrient_add(
 
     if site_path.is_none() {
         if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error("invalid_domain", &e);
+            return out.error_hypha(&e);
         }
     }
     let site = SiteDir::from_args(domain, site_path);
@@ -97,7 +97,7 @@ pub fn handle_nutrient_remove(
 
     if site_path.is_none() {
         if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error("invalid_domain", &e);
+            return out.error_hypha(&e);
         }
     }
     let site = SiteDir::from_args(domain, site_path);
@@ -134,7 +134,7 @@ pub fn handle_nutrient_clear(out: &Output, domain: &str, site_path: Option<&str>
 
     if site_path.is_none() {
         if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error("invalid_domain", &e);
+            return out.error_hypha(&e);
         }
     }
     let site = SiteDir::from_args(domain, site_path);

@@ -36,12 +36,16 @@ impl DeltaByteBudget {
     }
 }
 
-/// Download a file from URL to local path
+/// Download a file from URL to local path using streaming I/O.
+///
+/// Streams the response body to disk in chunks instead of buffering the entire
+/// response in memory, keeping memory usage bounded regardless of file size.
 pub async fn download_file(
     url: &str,
     dest: &std::path::Path,
     max_download_bytes: u64,
 ) -> Result<(), ExtractError> {
+    use futures_util::StreamExt;
     use std::io::Write;
 
     let client = substrate::client::http_client(300)
@@ -66,30 +70,33 @@ pub async fn download_file(
         }
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
-    if bytes.len() as u64 > max_download_bytes {
-        return Err(ExtractError::Malicious(format!(
-            "Download exceeds max_download_bytes ({})",
-            max_download_bytes
-        )));
-    }
-
+    // Stream response body to a temp file, then rename atomically
     let dest = dest.to_path_buf();
-    let write_result = tokio::task::spawn_blocking(move || {
-        let mut out =
-            std::fs::File::create(&dest).map_err(|e| format!("Failed to create file: {}", e))?;
-        out.write_all(&bytes)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
-        out.sync_all()
-            .map_err(|e| format!("Failed to sync file: {}", e))?;
-        Ok::<(), String>(())
-    })
-    .await
-    .map_err(|e| format!("Download task failed: {}", e))?;
-    write_result?;
+    let tmp_dest = dest.with_extension("tmp");
+    let mut file = std::fs::File::create(&tmp_dest)
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+    let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("Failed to read stream chunk: {}", e))?;
+        downloaded += chunk.len() as u64;
+        if downloaded > max_download_bytes {
+            drop(file);
+            let _ = std::fs::remove_file(&tmp_dest);
+            return Err(ExtractError::Malicious(format!(
+                "Download exceeds max_download_bytes ({})",
+                max_download_bytes
+            )));
+        }
+        file.write_all(&chunk)
+            .map_err(|e| format!("Failed to write chunk: {}", e))?;
+    }
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync file: {}", e))?;
+    drop(file);
+
+    std::fs::rename(&tmp_dest, &dest).map_err(|e| format!("Failed to rename temp file: {}", e))?;
 
     Ok(())
 }

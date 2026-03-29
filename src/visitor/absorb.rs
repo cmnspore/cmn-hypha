@@ -83,8 +83,7 @@ pub async fn absorb(
             max_depth,
             resolved.token_secret.as_deref(),
         )
-        .await
-        .map_err(|e| crate::HyphaError::new("synapse_error", e))?;
+        .await?;
 
         let mut discovered: Vec<String> = bonds
             .result
@@ -231,8 +230,7 @@ pub async fn absorb(
         for dist_entry in dist_array {
             if dist_has_type(dist_entry, "archive") {
                 for archive_ep in &archive_endpoints {
-                    let archive_url = build_archive_url_from_endpoint(archive_ep, hash)
-                        .map_err(|e| crate::HyphaError::new("url_error", e))?;
+                    let archive_url = build_archive_url_from_endpoint(archive_ep, hash)?;
 
                     if content_dir.exists() {
                         std::fs::remove_dir_all(&content_dir).map_err(|e| {

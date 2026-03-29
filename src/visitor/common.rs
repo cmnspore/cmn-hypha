@@ -31,11 +31,14 @@ pub(super) fn dist_has_type(entry: &substrate::SporeDist, expected: &str) -> boo
 pub(super) fn build_archive_url_from_endpoint(
     endpoint: &CmnEndpoint,
     hash: &str,
-) -> Result<String, String> {
+) -> Result<String, crate::HyphaError> {
     endpoint.resolve_url(hash).map_err(|e| {
-        format!(
-            "Invalid archive endpoint for format {:?}: {}",
-            endpoint.format, e
+        crate::HyphaError::new(
+            "url_error",
+            format!(
+                "Invalid archive endpoint for format {:?}: {}",
+                endpoint.format, e
+            ),
         )
     })
 }
@@ -44,11 +47,14 @@ pub(super) fn build_archive_delta_url_from_endpoint(
     endpoint: &CmnEndpoint,
     hash: &str,
     old_hash: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, crate::HyphaError> {
     endpoint.resolve_delta_url(hash, old_hash).map_err(|e| {
-        format!(
-            "Invalid archive delta endpoint for format {:?}: {}",
-            endpoint.format, e
+        crate::HyphaError::new(
+            "url_error",
+            format!(
+                "Invalid archive delta endpoint for format {:?}: {}",
+                endpoint.format, e
+            ),
         )
     })
 }
@@ -60,28 +66,45 @@ pub(super) fn is_safe_bond_dir_name(name: &str) -> bool {
         || substrate::parse_hash(name).is_ok()
 }
 
-/// Fetch cmn.json from network.
+/// Fetch cmn.json from network with retry for transient errors.
 ///
 /// Returns `cmn_not_found` when the domain has no cmn.json (HTTP 404),
 /// `cmn_failed` for all other errors (network, parse, non-404 HTTP status).
+/// Retries up to 2 times with exponential backoff for non-404 errors.
 pub(super) async fn fetch_cmn_json(domain: &str) -> Result<CmnEntry, crate::HyphaError> {
     let client = substrate::client::http_client(30)
         .map_err(|e| crate::HyphaError::new("cmn_failed", format!("HTTP client error: {e}")))?;
 
-    substrate::client::fetch_cmn_entry(&client, domain, Default::default())
-        .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("returned 404") {
-                crate::HyphaError::with_hint(
-                    "cmn_not_found",
-                    msg,
-                    "The domain must serve a cmn.json at /.well-known/cmn.json. Use 'hypha mycelium root' to initialize a CMN site, then deploy the public/ directory.",
-                )
-            } else {
-                crate::HyphaError::new("cmn_failed", msg)
+    let mut last_err = None;
+    for attempt in 0..3u32 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                500 * 2u64.pow(attempt - 1),
+            ))
+            .await;
+        }
+
+        match substrate::client::fetch_cmn_entry(&client, domain, Default::default()).await {
+            Ok(entry) => return Ok(entry),
+            Err(e) => {
+                let msg = e.to_string();
+                // Don't retry 404 — the resource genuinely doesn't exist
+                if msg.contains("returned 404") {
+                    return Err(crate::HyphaError::with_hint(
+                        "cmn_not_found",
+                        msg,
+                        "The domain must serve a cmn.json at /.well-known/cmn.json. Use 'hypha mycelium root' to initialize a CMN site, then deploy the public/ directory.",
+                    ));
+                }
+                last_err = Some(msg);
             }
-        })
+        }
+    }
+
+    Err(crate::HyphaError::new(
+        "cmn_failed",
+        last_err.unwrap_or_else(|| "Unknown error".to_string()),
+    ))
 }
 
 pub(super) fn mtime_epoch_ms(path: impl AsRef<std::path::Path>) -> Option<u64> {

@@ -29,7 +29,7 @@ pub(super) async fn check_for_update(
             }
         }
         Ok(None) => return Ok(None),
-        Err(e) => return Err(crate::HyphaError::new("synapse_error", e)),
+        Err(e) => return Err(e),
     };
 
     if new_hash == current_hash {
@@ -135,8 +135,7 @@ pub(super) async fn update_bonds(
         let core_value = serde_json::to_value(&core).map_err(|e| {
             crate::HyphaError::new("write_error", format!("serialize error: {}", e))
         })?;
-        crate::spore::write_spore_core(&spore_core_path, &core_value)
-            .map_err(|e| crate::HyphaError::new("write_error", e))?;
+        crate::spore::write_spore_core(&spore_core_path, &core_value)?;
     }
 
     Ok(serde_json::json!({
@@ -150,7 +149,7 @@ pub(super) async fn find_latest_version(
     current_hash: &str,
     source_domain: &str,
     token: Option<&str>,
-) -> Result<Option<BondNode>, String> {
+) -> Result<Option<BondNode>, crate::HyphaError> {
     let mut candidate_hash = current_hash.to_string();
     let mut latest: Option<BondNode> = None;
 

@@ -190,9 +190,7 @@ async fn taste_record_lib(
         tasted_at_epoch_ms: now_epoch_ms,
     };
 
-    domain_cache
-        .save_taste(hash, &taste_cache)
-        .map_err(|e| crate::HyphaError::new("write_error", e))?;
+    domain_cache.save_taste(hash, &taste_cache)?;
 
     let mut output = crate::output::TasteRecordOutput {
         uri: uri_str.to_string(),
@@ -236,7 +234,7 @@ async fn taste_record_lib(
                             message: format!("Failed to share taste report: {}", e),
                         });
                         output.shared = Some(false);
-                        output.share_error = Some(e);
+                        output.share_error = Some(e.to_string());
                     }
                 }
             }
@@ -245,7 +243,7 @@ async fn taste_record_lib(
                     message: format!("Failed to resolve synapse: {}", e),
                 });
                 output.shared = Some(false);
-                output.share_error = Some(e);
+                output.share_error = Some(e.to_string());
             }
         }
     }
@@ -319,9 +317,7 @@ fn taste_domain_record_lib(
         tasted_at_epoch_ms: now_epoch_ms,
     };
 
-    domain_cache
-        .save_domain_taste(&taste_cache)
-        .map_err(|e| crate::HyphaError::new("write_error", e))?;
+    domain_cache.save_domain_taste(&taste_cache)?;
 
     Ok(crate::output::TasteRecordOutput {
         uri: uri_str.to_string(),
@@ -445,19 +441,27 @@ async fn share_taste_report_lib(
     synapse_url: &str,
     synapse_token: Option<&str>,
     now_epoch_ms: u64,
-) -> Result<(), String> {
+) -> Result<(), crate::HyphaError> {
     crate::site::validate_site_domain_path(signing_domain)?;
     let site = crate::site::SiteDir::new(signing_domain);
 
     if !site.private_key_path().exists() {
-        return Err(format!("No identity found for domain '{}'", signing_domain));
+        return Err(crate::HyphaError::new(
+            "identity_not_found",
+            format!("No identity found for domain '{}'", signing_domain),
+        ));
     }
 
-    let target_uri = substrate::normalize_taste_target_uri(uri_str)
-        .map_err(|e| format!("Invalid target URI '{}': {}", uri_str, e))?;
+    let target_uri = substrate::normalize_taste_target_uri(uri_str).map_err(|e| {
+        crate::HyphaError::new(
+            "invalid_uri",
+            format!("Invalid target URI '{}': {}", uri_str, e),
+        )
+    })?;
 
-    let identity = crate::auth::get_identity_with_site(signing_domain, &site)
-        .map_err(|e| format!("Failed to load identity: {}", e))?;
+    let identity = crate::auth::get_identity_with_site(signing_domain, &site).map_err(|e| {
+        crate::HyphaError::new("identity_error", format!("Failed to load identity: {}", e))
+    })?;
 
     let core = substrate::TasteCore {
         target_uri: target_uri.clone(),
@@ -469,8 +473,10 @@ async fn share_taste_report_lib(
     };
 
     let core_signature = crate::auth::sign_json_with_site(&site, &core).map_err(|e| match e {
-        crate::auth::JsonSignError::Jcs(message) => message,
-        crate::auth::JsonSignError::Sign(err) => format!("Failed to sign core: {}", err),
+        crate::auth::JsonSignError::Jcs(message) => crate::HyphaError::new("jcs_error", message),
+        crate::auth::JsonSignError::Sign(err) => {
+            crate::HyphaError::new("sign_error", format!("Failed to sign core: {}", err))
+        }
     })?;
 
     let mut payload = substrate::Taste {
@@ -483,48 +489,75 @@ async fn share_taste_report_lib(
         capsule_signature: String::new(),
     };
 
-    let taste_hash = payload
-        .computed_uri_hash()
-        .map_err(|e| format!("JCS hash input serialization failed: {}", e))?;
+    let taste_hash = payload.computed_uri_hash().map_err(|e| {
+        crate::HyphaError::new(
+            "jcs_error",
+            format!("JCS hash input serialization failed: {}", e),
+        )
+    })?;
     payload.capsule.uri = substrate::build_taste_uri(signing_domain, &taste_hash);
 
     let capsule_signature =
         crate::auth::sign_json_with_site(&site, &payload.capsule).map_err(|e| match e {
-            crate::auth::JsonSignError::Jcs(message) => message,
-            crate::auth::JsonSignError::Sign(err) => format!("Failed to sign capsule: {}", err),
+            crate::auth::JsonSignError::Jcs(message) => {
+                crate::HyphaError::new("jcs_error", message)
+            }
+            crate::auth::JsonSignError::Sign(err) => {
+                crate::HyphaError::new("sign_error", format!("Failed to sign capsule: {}", err))
+            }
         })?;
     payload.capsule_signature = capsule_signature;
 
     // Validate against schema before writing/sending
-    let payload_value = serde_json::to_value(&payload)
-        .map_err(|e| format!("Failed to serialize taste report: {}", e))?;
+    let payload_value = serde_json::to_value(&payload).map_err(|e| {
+        crate::HyphaError::new(
+            "serialize_error",
+            format!("Failed to serialize taste report: {}", e),
+        )
+    })?;
     if let Err(e) = substrate::validate_schema(&payload_value) {
-        return Err(format!("Taste schema validation failed: {}", e));
+        return Err(crate::HyphaError::new(
+            "schema_error",
+            format!("Taste schema validation failed: {}", e),
+        ));
     }
 
     // Write to site's taste dir for local persistence
     let taste_dir = site.taste_dir();
     if let Err(e) = std::fs::create_dir_all(&taste_dir) {
-        return Err(format!("Failed to create taste dir: {}", e));
+        return Err(crate::HyphaError::new(
+            "write_error",
+            format!("Failed to create taste dir: {}", e),
+        ));
     }
     let taste_path = taste_dir.join(format!("{}.json", taste_hash));
-    let payload_json = payload
-        .to_pretty_json()
-        .map_err(|e| format!("Failed to format taste report: {}", e))?;
+    let payload_json = payload.to_pretty_json().map_err(|e| {
+        crate::HyphaError::new(
+            "serialize_error",
+            format!("Failed to format taste report: {}", e),
+        )
+    })?;
     std::fs::write(&taste_path, &payload_json).map_err(|e| {
-        format!(
-            "Failed to write taste report to {}: {}",
-            taste_path.display(),
-            e
+        crate::HyphaError::new(
+            "write_error",
+            format!(
+                "Failed to write taste report to {}: {}",
+                taste_path.display(),
+                e
+            ),
         )
     })?;
 
-    let client = substrate::client::http_client(30)
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    let client = substrate::client::http_client(30).map_err(|e| {
+        crate::HyphaError::new(
+            "synapse_error",
+            format!("Failed to create HTTP client: {}", e),
+        )
+    })?;
     let opts = fetch_opts(synapse_token);
     substrate::client::post_synapse_pulse(&client, synapse_url, &payload_value, opts)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
 
     Ok(())
 }
@@ -534,12 +567,16 @@ async fn fetch_taste_reports(
     synapse_url: &str,
     hash: &str,
     token: Option<&str>,
-) -> Result<serde_json::Value, String> {
-    let client = substrate::client::http_client(30)
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+) -> Result<serde_json::Value, crate::HyphaError> {
+    let client = substrate::client::http_client(30).map_err(|e| {
+        crate::HyphaError::new(
+            "synapse_error",
+            format!("Failed to create HTTP client: {}", e),
+        )
+    })?;
     substrate::client::fetch_taste_reports(&client, synapse_url, hash, fetch_opts(token))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))
 }
 
 #[allow(clippy::too_many_arguments)]

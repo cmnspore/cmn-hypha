@@ -13,7 +13,7 @@ pub async fn handle_pulse(
 ) -> ExitCode {
     let resolved = match crate::config::resolve_synapse(synapse_arg, synapse_token_secret) {
         Ok(r) => r,
-        Err(e) => return out.error("synapse_error", &e),
+        Err(e) => return out.error_hypha(&e),
     };
 
     let content = match std::fs::read_to_string(file_path) {
@@ -77,7 +77,7 @@ pub fn handle_serve(
     if site_path.is_none() {
         if let Some(d) = domain {
             if let Err(e) = site::validate_site_domain_path(d) {
-                return out.error("invalid_domain", &e);
+                return out.error_hypha(&e);
             }
         }
     }

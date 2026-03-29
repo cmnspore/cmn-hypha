@@ -1,14 +1,18 @@
 use std::fs;
 use std::path::PathBuf;
 
-pub fn validate_site_domain_path(domain: &str) -> Result<(), String> {
+pub fn validate_site_domain_path(domain: &str) -> Result<(), crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
     if domain.is_empty() {
-        return Err("Domain must not be empty".to_string());
+        return Err(HyphaError::new(
+            "invalid_domain",
+            "Domain must not be empty",
+        ));
     }
     if domain.chars().any(|c| c.is_control()) {
-        return Err(format!(
-            "Invalid domain '{}': contains control characters",
-            domain
+        return Err(HyphaError::new(
+            "invalid_domain",
+            format!("Invalid domain '{}': contains control characters", domain),
         ));
     }
 
@@ -17,9 +21,9 @@ pub fn validate_site_domain_path(domain: &str) -> Result<(), String> {
         matches!(components.next(), Some(std::path::Component::Normal(_)))
             && components.next().is_none();
     if !single_normal_component {
-        return Err(format!(
-            "Invalid domain '{}': must be a single path segment",
-            domain
+        return Err(HyphaError::new(
+            "invalid_domain",
+            format!("Invalid domain '{}': must be a single path segment", domain),
         ));
     }
 

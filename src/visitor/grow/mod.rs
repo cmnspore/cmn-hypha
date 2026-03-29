@@ -142,7 +142,7 @@ pub async fn grow(
                 hash: current_hash,
             });
         }
-        Err(e) => return Err(crate::HyphaError::new("synapse_error", e)),
+        Err(e) => return Err(e),
     };
 
     if new_hash == current_hash {
@@ -598,7 +598,9 @@ async fn pull_from_archive_lib(
                         Ok(Some(url)) => url,
                         Ok(None) => continue,
                         Err(e) => {
-                            sink.emit(crate::HyphaEvent::Warn { message: e });
+                            sink.emit(crate::HyphaEvent::Warn {
+                                message: e.to_string(),
+                            });
                             continue;
                         }
                     };
@@ -647,8 +649,7 @@ async fn pull_from_archive_lib(
             .iter()
             .filter(|endpoint| endpoint.kind == "archive")
         {
-            let resolved_url = build_archive_url_from_endpoint(archive_ep, new_hash)
-                .map_err(|e| crate::HyphaError::new("url_error", e))?;
+            let resolved_url = build_archive_url_from_endpoint(archive_ep, new_hash)?;
             let archive_path = temp_dir.path().join("archive");
 
             if let Err(e) =
@@ -710,18 +711,24 @@ async fn pull_from_archive_lib(
 }
 
 /// Remove all tracked files from the working directory (except .git)
-fn remove_tracked_files(repo_path: &std::path::Path) -> Result<(), String> {
+fn remove_tracked_files(repo_path: &std::path::Path) -> Result<(), crate::HyphaError> {
     for entry in walkdir::WalkDir::new(repo_path)
         .min_depth(1)
         .into_iter()
         .filter_entry(|e| e.file_name() != ".git" && e.file_name() != ".cmn")
     {
-        let entry = entry.map_err(|e| format!("Failed to walk directory: {}", e))?;
+        let entry = entry.map_err(|e| {
+            crate::HyphaError::new("grow_error", format!("Failed to walk directory: {}", e))
+        })?;
         let path = entry.path();
 
         if path.is_file() {
-            std::fs::remove_file(path)
-                .map_err(|e| format!("Failed to remove {}: {}", path.display(), e))?;
+            std::fs::remove_file(path).map_err(|e| {
+                crate::HyphaError::new(
+                    "grow_error",
+                    format!("Failed to remove {}: {}", path.display(), e),
+                )
+            })?;
         }
     }
 
@@ -732,7 +739,9 @@ fn remove_tracked_files(repo_path: &std::path::Path) -> Result<(), String> {
         .into_iter()
         .filter_entry(|e| e.file_name() != ".git" && e.file_name() != ".cmn")
     {
-        let entry = entry.map_err(|e| format!("Failed to walk directory: {}", e))?;
+        let entry = entry.map_err(|e| {
+            crate::HyphaError::new("grow_error", format!("Failed to walk directory: {}", e))
+        })?;
         let path = entry.path();
 
         if path.is_dir() {
@@ -754,23 +763,38 @@ fn remove_tracked_files(repo_path: &std::path::Path) -> Result<(), String> {
 fn save_spawned_from_manifest(
     project_dir: &Path,
     manifest: &serde_json::Value,
-) -> Result<(), String> {
-    let spore = substrate::decode_spore(manifest)
-        .map_err(|e| format!("Invalid source spore manifest: {}", e))?;
-    let pretty = spore
-        .to_pretty_json()
-        .map_err(|e| format!("Failed to format source spore manifest: {}", e))?;
+) -> Result<(), crate::HyphaError> {
+    let spore = substrate::decode_spore(manifest).map_err(|e| {
+        crate::HyphaError::new(
+            "grow_error",
+            format!("Invalid source spore manifest: {}", e),
+        )
+    })?;
+    let pretty = spore.to_pretty_json().map_err(|e| {
+        crate::HyphaError::new(
+            "grow_error",
+            format!("Failed to format source spore manifest: {}", e),
+        )
+    })?;
 
     let spawned_from_path = project_dir
         .join(".cmn")
         .join("spawned-from")
         .join("spore.json");
     if let Some(parent) = spawned_from_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create spawned-from directory: {}", e))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            crate::HyphaError::new(
+                "grow_error",
+                format!("Failed to create spawned-from directory: {}", e),
+            )
+        })?;
     }
-    std::fs::write(&spawned_from_path, pretty)
-        .map_err(|e| format!("Failed to write {}: {}", spawned_from_path.display(), e))?;
+    std::fs::write(&spawned_from_path, pretty).map_err(|e| {
+        crate::HyphaError::new(
+            "grow_error",
+            format!("Failed to write {}: {}", spawned_from_path.display(), e),
+        )
+    })?;
     Ok(())
 }
 

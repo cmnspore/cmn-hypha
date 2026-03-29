@@ -58,7 +58,7 @@ pub fn handle_hatch(out: &Output, args: HatchArgs) -> ExitCode {
     }
 
     if let Err(e) = save_draft(&spore_core_path, &draft) {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     out.ok(&draft)
@@ -86,7 +86,7 @@ pub fn handle_tree_set(
     }
 
     if let Err(e) = save_draft(&spore_core_path, &draft) {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     out.ok(&draft.tree)

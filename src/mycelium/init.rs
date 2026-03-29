@@ -33,7 +33,7 @@ pub fn handle_init(out: &Output, args: InitArgs<'_>) -> ExitCode {
 
     if site_path.is_none() {
         if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error("invalid_domain", &e);
+            return out.error_hypha(&e);
         }
     }
 

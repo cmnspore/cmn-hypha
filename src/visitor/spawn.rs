@@ -49,16 +49,13 @@ pub async fn spawn(
     let public_key = capsule.key.clone();
     let ep = &capsule.endpoints;
 
-    let manifest = fetch_spore_manifest(capsule, hash)
-        .await
-        .map_err(|e| crate::HyphaError::new("manifest_failed", e))?;
+    let manifest = fetch_spore_manifest(capsule, hash).await?;
     let spore = decode_spore_manifest(&manifest)?;
 
     // For replicated spores, core.key (author) may differ from the host key.
     // Use the embedded author key when present; fall back to host key for self-hosted spores.
     let author_key = embedded_spore_author_key(&manifest).unwrap_or_else(|| public_key.clone());
-    verify_manifest_two_key_signatures(&manifest, &public_key, &author_key)
-        .map_err(|e| crate::HyphaError::new("sig_failed", e))?;
+    verify_manifest_two_key_signatures(&manifest, &public_key, &author_key)?;
 
     let id_opt = (!spore.capsule.core.id.is_empty()).then_some(spore.capsule.core.id.as_str());
     let name = spore.capsule.core.name.as_str();
@@ -355,8 +352,7 @@ async fn spawn_from_archive_lib(
         .iter()
         .filter(|endpoint| endpoint.kind == "archive")
     {
-        let resolved_url = build_archive_url_from_endpoint(archive_ep, hash)
-            .map_err(|e| crate::HyphaError::new("url_error", e))?;
+        let resolved_url = build_archive_url_from_endpoint(archive_ep, hash)?;
         match download_file(&resolved_url, &archive_path, cache.max_download_bytes).await {
             Ok(_) => {
                 downloaded = true;
@@ -519,19 +515,34 @@ pub(super) fn extract_archive(
 pub(super) fn save_spawned_from_manifest(
     spore_core_path: &Path,
     manifest: &serde_json::Value,
-) -> Result<(), String> {
+) -> Result<(), crate::HyphaError> {
     let cmn_dir = spore_core_path.parent().unwrap_or(spore_core_path);
     let spawned_from_dir = cmn_dir.join(".cmn").join("spawned-from");
-    std::fs::create_dir_all(&spawned_from_dir)
-        .map_err(|e| format!("Failed to create .cmn/spawned-from: {}", e))?;
+    std::fs::create_dir_all(&spawned_from_dir).map_err(|e| {
+        crate::HyphaError::new(
+            "spawn_error",
+            format!("Failed to create .cmn/spawned-from: {}", e),
+        )
+    })?;
 
-    let spore = substrate::decode_spore(manifest)
-        .map_err(|e| format!("Invalid source spore manifest: {}", e))?;
-    let pretty = spore
-        .to_pretty_json()
-        .map_err(|e| format!("Failed to format source spore manifest: {}", e))?;
-    std::fs::write(spawned_from_dir.join("spore.json"), pretty)
-        .map_err(|e| format!("Failed to write .cmn/spawned-from/spore.json: {}", e))?;
+    let spore = substrate::decode_spore(manifest).map_err(|e| {
+        crate::HyphaError::new(
+            "spawn_error",
+            format!("Invalid source spore manifest: {}", e),
+        )
+    })?;
+    let pretty = spore.to_pretty_json().map_err(|e| {
+        crate::HyphaError::new(
+            "spawn_error",
+            format!("Failed to format source spore manifest: {}", e),
+        )
+    })?;
+    std::fs::write(spawned_from_dir.join("spore.json"), pretty).map_err(|e| {
+        crate::HyphaError::new(
+            "spawn_error",
+            format!("Failed to write .cmn/spawned-from/spore.json: {}", e),
+        )
+    })?;
 
     Ok(())
 }

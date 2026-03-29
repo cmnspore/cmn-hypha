@@ -104,9 +104,13 @@ async fn fetch_bonds(
     direction: &str,
     max_depth: u32,
     token: Option<&str>,
-) -> Result<substrate::client::BondsResponse, String> {
-    let client = substrate::client::http_client(30)
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+) -> Result<substrate::client::BondsResponse, crate::HyphaError> {
+    let client = substrate::client::http_client(30).map_err(|e| {
+        crate::HyphaError::new(
+            "synapse_error",
+            format!("Failed to create HTTP client: {}", e),
+        )
+    })?;
     substrate::client::fetch_lineage(
         &client,
         synapse_url,
@@ -116,7 +120,7 @@ async fn fetch_bonds(
         fetch_opts(token),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))
 }
 
 /// Clone git repository to a directory (shallow)
@@ -243,10 +247,10 @@ async fn fetch_spore_to_cache(
                 })?;
                 resp.result.spore
             } else {
-                return Err(crate::HyphaError::new("manifest_failed", domain_err));
+                return Err(domain_err);
             }
         }
-        Err(e) => return Err(crate::HyphaError::new("manifest_failed", e)),
+        Err(e) => return Err(e),
     };
 
     // Step 3: Verifying spore with key trust
@@ -320,8 +324,7 @@ async fn fetch_spore_to_cache(
     for dist_entry in dist {
         if dist_has_type(dist_entry, "archive") {
             for archive_ep in &archive_endpoints {
-                let archive_url = build_archive_url_from_endpoint(archive_ep, hash)
-                    .map_err(|e| crate::HyphaError::new("url_error", e))?;
+                let archive_url = build_archive_url_from_endpoint(archive_ep, hash)?;
                 match download_and_extract_tarball_cached_with_progress(
                     &archive_url,
                     &target_path,
@@ -386,8 +389,9 @@ async fn fetch_spore_to_cache(
     let content_path = target_path.join("content");
     if let Err(e) = verify_content_hash(&content_path, hash, &manifest) {
         warn_remove_dir(sink, &target_path);
-        mark_toxic(&domain_cache, hash, &e);
-        return Err(crate::HyphaError::new("TOXIC", e));
+        let msg = e.to_string();
+        mark_toxic(&domain_cache, hash, &msg);
+        return Err(crate::HyphaError::new("TOXIC", msg));
     }
 
     Ok(())

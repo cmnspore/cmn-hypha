@@ -110,20 +110,55 @@ impl HyphaConfig {
     pub fn load() -> Self {
         let path = config_path();
         match std::fs::read_to_string(&path) {
-            Ok(content) => toml::from_str(&content).unwrap_or_default(),
+            Ok(content) => match toml::from_str(&content) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    use std::io::Write;
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "error: failed to parse {}: {}\nhint: fix the file or remove it to use defaults",
+                        path.display(),
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            },
             Err(_) => Self::default(),
         }
     }
 
-    pub fn save(&self) -> Result<(), String> {
+    pub fn save(&self) -> Result<(), crate::sink::HyphaError> {
+        use crate::sink::HyphaError;
         let path = config_path();
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                HyphaError::new(
+                    "config_save_failed",
+                    format!("Failed to create config directory: {}", e),
+                )
+            })?;
         }
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        std::fs::write(&path, content).map_err(|e| format!("Failed to write config.toml: {}", e))
+        let content = toml::to_string_pretty(self).map_err(|e| {
+            HyphaError::new(
+                "config_save_failed",
+                format!("Failed to serialize config: {}", e),
+            )
+        })?;
+
+        // Atomic write via temp file + rename to prevent concurrent corruption
+        let tmp_path = path.with_extension("toml.tmp");
+        std::fs::write(&tmp_path, &content).map_err(|e| {
+            HyphaError::new(
+                "config_save_failed",
+                format!("Failed to write temp config: {}", e),
+            )
+        })?;
+        std::fs::rename(&tmp_path, &path).map_err(|e| {
+            HyphaError::new(
+                "config_save_failed",
+                format!("Failed to rename config.toml: {}", e),
+            )
+        })
     }
 }
 
@@ -242,7 +277,7 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
             "key": key,
             "value": value,
         })),
-        Err(e) => out.error("save_error", &e),
+        Err(e) => out.error_hypha(&e),
     }
 }
 
@@ -263,14 +298,21 @@ pub struct ResolvedSynapse {
     pub token_secret: Option<String>,
 }
 
-fn validate_synapse_domain(domain: &str) -> Result<(), String> {
+fn validate_synapse_domain(domain: &str) -> Result<(), crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
     if domain.is_empty() {
-        return Err("Synapse domain must not be empty".to_string());
+        return Err(HyphaError::new(
+            "invalid_synapse_domain",
+            "Synapse domain must not be empty",
+        ));
     }
     if domain.chars().any(|c| c.is_control()) {
-        return Err(format!(
-            "Invalid synapse domain '{}': contains control characters",
-            domain
+        return Err(HyphaError::new(
+            "invalid_synapse_domain",
+            format!(
+                "Invalid synapse domain '{}': contains control characters",
+                domain
+            ),
         ));
     }
 
@@ -279,9 +321,12 @@ fn validate_synapse_domain(domain: &str) -> Result<(), String> {
         matches!(components.next(), Some(std::path::Component::Normal(_)))
             && components.next().is_none();
     if !single_normal_component {
-        return Err(format!(
-            "Invalid synapse domain '{}': must be a single path segment",
-            domain
+        return Err(HyphaError::new(
+            "invalid_synapse_domain",
+            format!(
+                "Invalid synapse domain '{}': must be a single path segment",
+                domain
+            ),
         ));
     }
 
@@ -304,45 +349,77 @@ pub fn load_synapse_node(domain: &str) -> Option<SynapseNode> {
 }
 
 /// Save a synapse node config to its directory (0600 permissions)
-pub fn save_synapse_node(domain: &str, node: &SynapseNode) -> Result<(), String> {
+pub fn save_synapse_node(domain: &str, node: &SynapseNode) -> Result<(), crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
     validate_synapse_domain(domain)?;
     let dir = synapse_node_dir(domain);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create synapse node directory: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        HyphaError::new(
+            "synapse_node_save_failed",
+            format!("Failed to create synapse node directory: {}", e),
+        )
+    })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| format!("Failed to protect synapse node directory: {}", e))?;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| {
+            HyphaError::new(
+                "synapse_node_save_failed",
+                format!("Failed to protect synapse node directory: {}", e),
+            )
+        })?;
     }
 
     let path = dir.join("config.toml");
-    let content = toml::to_string_pretty(node)
-        .map_err(|e| format!("Failed to serialize node config: {}", e))?;
-    std::fs::write(&path, &content).map_err(|e| format!("Failed to write node config: {}", e))?;
+    let content = toml::to_string_pretty(node).map_err(|e| {
+        HyphaError::new(
+            "synapse_node_save_failed",
+            format!("Failed to serialize node config: {}", e),
+        )
+    })?;
+    std::fs::write(&path, &content).map_err(|e| {
+        HyphaError::new(
+            "synapse_node_save_failed",
+            format!("Failed to write node config: {}", e),
+        )
+    })?;
 
     // Protect config.toml (0600) — may contain token_secret
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(&path)
-            .map_err(|e| format!("Failed to read node config metadata: {}", e))?
+            .map_err(|e| {
+                HyphaError::new(
+                    "synapse_node_save_failed",
+                    format!("Failed to read node config metadata: {}", e),
+                )
+            })?
             .permissions();
         perms.set_mode(0o600);
-        std::fs::set_permissions(&path, perms)
-            .map_err(|e| format!("Failed to set node config permissions: {}", e))?;
+        std::fs::set_permissions(&path, perms).map_err(|e| {
+            HyphaError::new(
+                "synapse_node_save_failed",
+                format!("Failed to set node config permissions: {}", e),
+            )
+        })?;
     }
 
     Ok(())
 }
 
 /// Remove a synapse node directory
-pub fn remove_synapse_node(domain: &str) -> Result<(), String> {
+pub fn remove_synapse_node(domain: &str) -> Result<(), crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
     validate_synapse_domain(domain)?;
     let dir = synapse_node_dir(domain);
     if dir.exists() {
-        std::fs::remove_dir_all(&dir)
-            .map_err(|e| format!("Failed to remove synapse node directory: {}", e))?;
+        std::fs::remove_dir_all(&dir).map_err(|e| {
+            HyphaError::new(
+                "synapse_node_remove_failed",
+                format!("Failed to remove synapse node directory: {}", e),
+            )
+        })?;
     }
     Ok(())
 }
@@ -365,12 +442,14 @@ pub fn list_synapse_domains() -> Vec<String> {
 }
 
 /// Extract domain (host) from a URL
-pub fn domain_from_url(url: &str) -> Result<String, String> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL '{}': {}", url, e))?;
+pub fn domain_from_url(url: &str) -> Result<String, crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|e| HyphaError::new("invalid_url", format!("Invalid URL '{}': {}", url, e)))?;
     parsed
         .host_str()
         .map(|h| h.to_string())
-        .ok_or_else(|| format!("URL '{}' has no host", url))
+        .ok_or_else(|| HyphaError::new("invalid_url", format!("URL '{}' has no host", url)))
 }
 
 /// Resolve a synapse CLI argument (domain or URL) to a URL + optional token.
@@ -382,61 +461,71 @@ pub fn domain_from_url(url: &str) -> Result<String, String> {
 pub fn resolve_synapse(
     value: Option<&str>,
     token_override: Option<&str>,
-) -> Result<ResolvedSynapse, String> {
-    let mut resolved = match value {
-        Some(v) if reqwest::Url::parse(v).is_ok() => {
-            // Raw URL — check if a node exists for this domain
-            let parsed = reqwest::Url::parse(v)
-                .map_err(|e| format!("Invalid synapse URL '{}': {}", v, e))?;
-            if parsed.scheme() != "http" && parsed.scheme() != "https" {
-                return Err(format!(
-                    "Invalid synapse URL '{}': scheme must be http or https",
-                    v
-                ));
-            }
-            let domain = domain_from_url(v)?;
-            let node = load_synapse_node(&domain);
-            ResolvedSynapse {
-                url: v.to_string(),
-                token_secret: node.and_then(|n| n.token_secret),
-            }
-        }
-        Some(domain) => {
-            validate_synapse_domain(domain)?;
-            // Look up by domain
-            match load_synapse_node(domain) {
-                Some(node) => ResolvedSynapse {
-                    url: node.url,
-                    token_secret: node.token_secret,
-                },
-                None => {
-                    return Err(format!(
-                        "Synapse '{}' not found (run: hypha synapse add <url>)",
-                        domain
-                    ))
+) -> Result<ResolvedSynapse, crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
+    let mut resolved =
+        match value {
+            Some(v) if reqwest::Url::parse(v).is_ok() => {
+                // Raw URL — check if a node exists for this domain
+                let parsed = reqwest::Url::parse(v).map_err(|e| {
+                    HyphaError::new(
+                        "invalid_synapse_url",
+                        format!("Invalid synapse URL '{}': {}", v, e),
+                    )
+                })?;
+                if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                    return Err(HyphaError::new(
+                        "invalid_synapse_url",
+                        format!("Invalid synapse URL '{}': scheme must be http or https", v),
+                    ));
+                }
+                let domain = domain_from_url(v)?;
+                let node = load_synapse_node(&domain);
+                ResolvedSynapse {
+                    url: v.to_string(),
+                    token_secret: node.and_then(|n| n.token_secret),
                 }
             }
-        }
-        None => {
-            // Use default from config.toml
-            let config = HyphaConfig::load();
-            match &config.defaults.synapse {
+            Some(domain) => {
+                validate_synapse_domain(domain)?;
+                // Look up by domain
+                match load_synapse_node(domain) {
+                    Some(node) => ResolvedSynapse {
+                        url: node.url,
+                        token_secret: node.token_secret,
+                    },
+                    None => {
+                        return Err(HyphaError::with_hint(
+                            "synapse_not_found",
+                            format!("Synapse '{}' not found", domain),
+                            "run: hypha synapse add <url>",
+                        ))
+                    }
+                }
+            }
+            None => {
+                // Use default from config.toml
+                let config = HyphaConfig::load();
+                match &config.defaults.synapse {
                 Some(default_domain) => match load_synapse_node(default_domain) {
                     Some(node) => ResolvedSynapse {
                         url: node.url,
                         token_secret: node.token_secret,
                     },
-                    None => return Err(format!(
-                        "Default synapse '{}' not found (run: hypha synapse add <url>)",
-                        default_domain
+                    None => return Err(HyphaError::with_hint(
+                        "synapse_not_found",
+                        format!("Default synapse '{}' not found", default_domain),
+                        "run: hypha synapse add <url>",
                     )),
                 },
-                None => return Err(
-                    "No synapse specified and no default configured (use -s <url> or run: hypha synapse add <url> && hypha synapse use <domain>)".to_string(),
-                ),
+                None => return Err(HyphaError::with_hint(
+                    "synapse_not_configured",
+                    "No synapse specified and no default configured",
+                    "use -s <url> or run: hypha synapse add <url> && hypha synapse use <domain>",
+                )),
             }
-        }
-    };
+            }
+        };
 
     // env var SYNAPSE_TOKEN_SECRET overrides config
     if let Ok(ts) = std::env::var("SYNAPSE_TOKEN_SECRET") {

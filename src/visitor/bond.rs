@@ -335,8 +335,7 @@ pub(super) async fn bond_in_dir(
         for dist_entry in dist_array {
             if dist_has_type(dist_entry, "archive") {
                 for archive_ep in &archive_endpoints {
-                    let archive_url = build_archive_url_from_endpoint(archive_ep, hash)
-                        .map_err(|e| crate::HyphaError::new("url_error", e))?;
+                    let archive_url = build_archive_url_from_endpoint(archive_ep, hash)?;
 
                     if content_dir.exists() {
                         std::fs::remove_dir_all(&content_dir).map_err(|e| {
@@ -489,7 +488,7 @@ fn resolve_bond_dir_name(
 pub(super) fn write_refs_json(
     path: &std::path::Path,
     entries: &[BondIndexEntry],
-) -> Result<(), String> {
+) -> Result<(), crate::HyphaError> {
     let index = BondIndexFile {
         bonds: entries.to_vec(),
     };
@@ -497,7 +496,7 @@ pub(super) fn write_refs_json(
         path,
         serde_json::to_string_pretty(&index).unwrap_or_default(),
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| crate::HyphaError::new("bond_write_failed", e.to_string()))
 }
 
 #[cfg(test)]

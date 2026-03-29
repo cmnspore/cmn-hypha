@@ -105,7 +105,8 @@ fn sign_and_save_mycelium(
     let mycelium_value = serde_json::to_value(&*mycelium)?;
     substrate::validate_schema(&mycelium_value)
         .map_err(|e| MyceliumError::Schema(format!("Mycelium: {}", e)))?;
-    let mycelium_json = format_mycelium(&mycelium_value).map_err(MyceliumError::Format)?;
+    let mycelium_json =
+        format_mycelium(&mycelium_value).map_err(|e| MyceliumError::Format(e.to_string()))?;
     std::fs::write(&mycelium_file, &mycelium_json)?;
 
     let endpoints = endpoints

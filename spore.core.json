@@ -2,7 +2,7 @@
   "$schema": "https://cmn.dev/schemas/v1/spore-core.json",
   "id": "cmn-hypha",
   "name": "CMN Hypha",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "domain": "cmn.dev",
   "key": "ed25519.7BmCWmBb2YeUWR7pmHvwAvi9wRm96VpZsJvZFSTfc2Uu",
   "synopsis": "CMN reference client CLI — releases spores, queries synapses, resolves bonds, and manages the local mycelium",
@@ -12,19 +12,16 @@
   ],
   "license": "MIT",
   "mutations": [
-    "Split monolithic source files into focused modules — visitor, spore, mycelium, cli, and auth each become separate module directories with dedicated files per command",
-    "Add Synapse data fallback — when a domain is unreachable, fetch spore and mycelium data from a trusted Synapse indexer with key-based verification, configurable via synapse witness fallback policy",
-    "Security hardening — reject symlinks at release and extraction, detect malicious archives in absorb and auto-mark as toxic, replace string-based error prefixes with typed ExtractError enum",
-    "Separate spawned_from tracking from spore.core.json — grow and absorb now read the upstream spore from .cmn/spawned-from/spore.json, release writes there instead of modifying spore.core.json",
-    "grow --bond integration — after syncing upstream, automatically check bond dependencies and fetch updated bonds via Synapse lineage",
-    "Add delta archive transfers — endpoint-driven archive deltas with zstd compression for efficient updates when the base hash is available",
-    "Mycelium management — add bio and nutrients fields to mycelium CLI, pulse now supports all document types (spore, taste, mycelium) not just mycelium",
-    "Replace docgen binary with --help-markdown flag built into the main binary via agent-first-data's clap-markdown integration"
+    "Unify error types with HyphaError across all modules — cache, sense, release — replacing ad-hoc string errors with structured machine-readable error codes",
+    "Add streaming archive download with progress reporting, replacing buffered full-file downloads",
+    "Use substrate TasteVerdictRecord for client-side taste caching instead of a hypha-specific duplicate type",
+    "Add Homebrew formula and Scoop manifest for cross-platform installation via package managers",
+    "Security and consistency improvements — field ordering, performance fixes, and convention compliance hardening"
   ],
   "bonds": [
     {
       "relation": "depends_on",
-      "uri": "cmn://cmn.dev/b3.HACXmE2ayjLS6jevn8rWyEYwq65m3sSjcwKgwHzrD24Z",
+      "uri": "cmn://cmn.dev/b3.AdVmyL8CADo3wJ1za4UP1VKv68MBfmcd8fMKDg5JwPpi",
       "id": "cmn-spec",
       "reason": "Implements the CMN protocol specification — reference client CLI"
     },

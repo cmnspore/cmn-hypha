@@ -198,10 +198,10 @@ async fn sense_spore_data(
                     fallback = Some("synapse");
                     resp.result.spore
                 } else {
-                    return Err(crate::HyphaError::new("manifest_failed", domain_err));
+                    return Err(domain_err);
                 }
             } else {
-                return Err(crate::HyphaError::new("manifest_failed", domain_err));
+                return Err(domain_err);
             }
         }
     };

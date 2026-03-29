@@ -69,14 +69,8 @@ impl FetchStatus {
     }
 }
 
-/// Cached taste verdict for a spore
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TasteVerdictCache {
-    pub verdict: substrate::TasteVerdict,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    pub tasted_at_epoch_ms: u64,
-}
+/// Cached taste verdict for a spore — alias for the substrate standard type.
+pub type TasteVerdictCache = substrate::TasteVerdictRecord;
 
 /// A cached key trust entry — records that a domain confirmed ownership of a key
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,7 +213,8 @@ impl CacheDir {
     }
 
     /// Remove all cached items
-    pub fn clean_all(&self) -> Result<usize, String> {
+    pub fn clean_all(&self) -> Result<usize, crate::sink::HyphaError> {
+        use crate::sink::HyphaError;
         if !self.root.exists() {
             return Ok(0);
         }
@@ -227,8 +222,12 @@ impl CacheDir {
         let spores = self.list_all();
         let count = spores.len();
 
-        std::fs::remove_dir_all(&self.root)
-            .map_err(|e| format!("Failed to remove cache directory: {}", e))?;
+        std::fs::remove_dir_all(&self.root).map_err(|e| {
+            HyphaError::new(
+                "cache_clean_failed",
+                format!("Failed to remove cache directory: {}", e),
+            )
+        })?;
 
         Ok(count)
     }
@@ -257,13 +256,19 @@ impl CacheDir {
 
 /// Write content atomically with an exclusive file lock to prevent concurrent corruption.
 /// Acquires a per-directory `.lock` file before performing the atomic write.
-fn locked_write_file(path: &std::path::Path, content: &str) -> Result<(), String> {
+fn locked_write_file(path: &std::path::Path, content: &str) -> Result<(), crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
     use fs2::FileExt;
 
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Cannot determine parent directory".to_string())?;
-    std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    let parent = path.parent().ok_or_else(|| {
+        HyphaError::new("cache_write_failed", "Cannot determine parent directory")
+    })?;
+    std::fs::create_dir_all(parent).map_err(|e| {
+        HyphaError::new(
+            "cache_write_failed",
+            format!("Failed to create directory: {}", e),
+        )
+    })?;
 
     let lock_path = parent.join(".lock");
     let lock_file = std::fs::OpenOptions::new()
@@ -271,11 +276,19 @@ fn locked_write_file(path: &std::path::Path, content: &str) -> Result<(), String
         .write(true)
         .truncate(true)
         .open(&lock_path)
-        .map_err(|e| format!("Failed to open lock file: {}", e))?;
+        .map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to open lock file: {}", e),
+            )
+        })?;
 
-    lock_file
-        .lock_exclusive()
-        .map_err(|e| format!("Failed to acquire lock: {}", e))?;
+    lock_file.lock_exclusive().map_err(|e| {
+        HyphaError::new(
+            "cache_write_failed",
+            format!("Failed to acquire lock: {}", e),
+        )
+    })?;
 
     let result = atomic_write_file(path, content);
 
@@ -285,12 +298,13 @@ fn locked_write_file(path: &std::path::Path, content: &str) -> Result<(), String
 
 /// Write content to a file atomically: write to a temp file in the same directory,
 /// then rename to the final path. This prevents partial/corrupt reads on crash.
-fn atomic_write_file(path: &std::path::Path, content: &str) -> Result<(), String> {
+fn atomic_write_file(path: &std::path::Path, content: &str) -> Result<(), crate::sink::HyphaError> {
+    use crate::sink::HyphaError;
     use std::io::Write;
 
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Cannot determine parent directory".to_string())?;
+    let parent = path.parent().ok_or_else(|| {
+        HyphaError::new("cache_write_failed", "Cannot determine parent directory")
+    })?;
 
     let tmp_path = parent.join(format!(
         ".tmp.{}",
@@ -300,21 +314,34 @@ fn atomic_write_file(path: &std::path::Path, content: &str) -> Result<(), String
             .as_nanos()
     ));
 
-    let mut f = std::fs::File::create(&tmp_path)
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    let mut f = std::fs::File::create(&tmp_path).map_err(|e| {
+        HyphaError::new(
+            "cache_write_failed",
+            format!("Failed to create temp file: {}", e),
+        )
+    })?;
     f.write_all(content.as_bytes()).map_err(|e| {
         let _ = std::fs::remove_file(&tmp_path);
-        format!("Failed to write temp file: {}", e)
+        HyphaError::new(
+            "cache_write_failed",
+            format!("Failed to write temp file: {}", e),
+        )
     })?;
     f.sync_all().map_err(|e| {
         let _ = std::fs::remove_file(&tmp_path);
-        format!("Failed to sync temp file: {}", e)
+        HyphaError::new(
+            "cache_write_failed",
+            format!("Failed to sync temp file: {}", e),
+        )
     })?;
     drop(f);
 
     std::fs::rename(&tmp_path, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp_path);
-        format!("Failed to rename temp file: {}", e)
+        HyphaError::new(
+            "cache_write_failed",
+            format!("Failed to rename temp file: {}", e),
+        )
     })
 }
 
@@ -375,13 +402,22 @@ impl DomainCache {
     }
 
     /// Save cmn.json entry to cache
-    pub fn save_cmn(&self, entry: &CmnEntry) -> Result<(), String> {
+    pub fn save_cmn(&self, entry: &CmnEntry) -> Result<(), crate::sink::HyphaError> {
+        use crate::sink::HyphaError;
         let dir = self.mycelium_dir();
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create mycelium dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to create mycelium dir: {}", e),
+            )
+        })?;
 
-        let content = serde_json::to_string_pretty(entry)
-            .map_err(|e| format!("Failed to serialize cmn entry: {}", e))?;
+        let content = serde_json::to_string_pretty(entry).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to serialize cmn entry: {}", e),
+            )
+        })?;
 
         locked_write_file(&self.cmn_path(), &content)
     }
@@ -408,13 +444,25 @@ impl DomainCache {
     }
 
     /// Save full mycelium manifest to cache
-    pub fn save_mycelium(&self, mycelium: &serde_json::Value) -> Result<(), String> {
+    pub fn save_mycelium(
+        &self,
+        mycelium: &serde_json::Value,
+    ) -> Result<(), crate::sink::HyphaError> {
+        use crate::sink::HyphaError;
         let dir = self.mycelium_dir();
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create mycelium dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to create mycelium dir: {}", e),
+            )
+        })?;
 
-        let content = crate::mycelium::format_mycelium(mycelium)
-            .map_err(|e| format!("Failed to serialize mycelium: {}", e))?;
+        let content = crate::mycelium::format_mycelium(mycelium).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to serialize mycelium: {}", e),
+            )
+        })?;
 
         locked_write_file(&self.mycelium_path(), &content)
     }
@@ -440,13 +488,22 @@ impl DomainCache {
     }
 
     /// Save cache status
-    pub fn save_status(&self, status: &CacheStatus) -> Result<(), String> {
+    pub fn save_status(&self, status: &CacheStatus) -> Result<(), crate::sink::HyphaError> {
+        use crate::sink::HyphaError;
         let dir = self.mycelium_dir();
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create mycelium dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to create mycelium dir: {}", e),
+            )
+        })?;
 
-        let content = serde_json::to_string_pretty(status)
-            .map_err(|e| format!("Failed to serialize status: {}", e))?;
+        let content = serde_json::to_string_pretty(status).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to serialize status: {}", e),
+            )
+        })?;
 
         locked_write_file(&self.status_path(), &content)
     }
@@ -471,13 +528,25 @@ impl DomainCache {
     }
 
     /// Save taste verdict for the domain itself
-    pub fn save_domain_taste(&self, verdict: &TasteVerdictCache) -> Result<(), String> {
+    pub fn save_domain_taste(
+        &self,
+        verdict: &TasteVerdictCache,
+    ) -> Result<(), crate::sink::HyphaError> {
+        use crate::sink::HyphaError;
         let dir = self.mycelium_dir();
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create mycelium dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to create mycelium dir: {}", e),
+            )
+        })?;
 
-        let content = serde_json::to_string_pretty(verdict)
-            .map_err(|e| format!("Failed to serialize domain taste verdict: {}", e))?;
+        let content = serde_json::to_string_pretty(verdict).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to serialize domain taste verdict: {}", e),
+            )
+        })?;
 
         locked_write_file(&self.domain_taste_path(), &content)
     }
@@ -502,12 +571,26 @@ impl DomainCache {
     }
 
     /// Save taste verdict for a spore
-    pub fn save_taste(&self, hash: &str, verdict: &TasteVerdictCache) -> Result<(), String> {
+    pub fn save_taste(
+        &self,
+        hash: &str,
+        verdict: &TasteVerdictCache,
+    ) -> Result<(), crate::sink::HyphaError> {
+        use crate::sink::HyphaError;
         let dir = self.spore_path(hash);
-        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create spore dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to create spore dir: {}", e),
+            )
+        })?;
 
-        let content = serde_json::to_string_pretty(verdict)
-            .map_err(|e| format!("Failed to serialize taste verdict: {}", e))?;
+        let content = serde_json::to_string_pretty(verdict).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to serialize taste verdict: {}", e),
+            )
+        })?;
 
         locked_write_file(&self.taste_path(hash), &content)
     }
@@ -533,10 +616,15 @@ impl DomainCache {
     }
 
     /// Save a key trust entry (domain confirmed this key)
-    pub fn save_key_trust(&self, key: &str) -> Result<(), String> {
+    pub fn save_key_trust(&self, key: &str) -> Result<(), crate::sink::HyphaError> {
+        use crate::sink::HyphaError;
         let dir = self.mycelium_dir();
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create mycelium dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to create mycelium dir: {}", e),
+            )
+        })?;
 
         let mut entries = self.load_key_trust();
         // Update existing or add new
@@ -549,8 +637,12 @@ impl DomainCache {
             });
         }
 
-        let content = serde_json::to_string_pretty(&entries)
-            .map_err(|e| format!("Failed to serialize key trust: {}", e))?;
+        let content = serde_json::to_string_pretty(&entries).map_err(|e| {
+            HyphaError::new(
+                "cache_write_failed",
+                format!("Failed to serialize key trust: {}", e),
+            )
+        })?;
 
         locked_write_file(&self.key_trust_path(), &content)
     }
@@ -673,7 +765,7 @@ pub fn handle_clean(out: &Output, all: bool) -> ExitCode {
                 });
                 out.ok(data)
             }
-            Err(e) => out.error("clean_error", &e),
+            Err(e) => out.error_hypha(&e),
         }
     } else {
         // For now, just clean all. Later we can add age-based cleanup.

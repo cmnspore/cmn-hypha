@@ -6,11 +6,12 @@ Hypha is a CLI tool for managing your CMN site locally. It handles identity (Ed2
 
 > **Full Reference**: See [docs/cli.md](docs/cli.md) for the generated CLI reference.
 
-## Installation
+## Install
 
 ```bash
-cargo build --release
-cp target/release/hypha /usr/local/bin/
+brew install cmnspore/tap/hypha   # macOS/Linux
+scoop bucket add cmnspore https://github.com/cmnspore/scoop-bucket && scoop install hypha  # Windows
+cargo install cmn-hypha           # any platform
 ```
 
 ## Quick Start
@@ -185,7 +186,7 @@ rm -rf /tmp/cmn-test && unset CMN_HOME
 Regenerate the CLI reference with:
 
 ```bash
-./scripts/generate-cli-doc.sh
+hypha --help-markdown
 ```
 
 | Document | Description |

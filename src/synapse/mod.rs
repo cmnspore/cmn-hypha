@@ -38,7 +38,7 @@ pub async fn handle_info(
 ) -> ExitCode {
     let resolved = match config::resolve_synapse(synapse, synapse_token_secret) {
         Ok(r) => r,
-        Err(e) => return out.error("synapse_error", &e),
+        Err(e) => return out.error_hypha(&e),
     };
 
     let url = format!("{}/health", resolved.url.trim_end_matches('/'));
@@ -93,7 +93,7 @@ pub async fn handle_info(
 pub fn handle_add(out: &Output, url: &str) -> ExitCode {
     let domain = match config::domain_from_url(url) {
         Ok(d) => d,
-        Err(e) => return out.error("synapse_error", &e),
+        Err(e) => return out.error_hypha(&e),
     };
 
     let node = SynapseNode {
@@ -102,7 +102,7 @@ pub fn handle_add(out: &Output, url: &str) -> ExitCode {
     };
 
     if let Err(e) = config::save_synapse_node(&domain, &node) {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     // Auto-set default if this is the first node
@@ -111,7 +111,7 @@ pub fn handle_add(out: &Output, url: &str) -> ExitCode {
     if domains.len() == 1 && config.defaults.synapse.is_none() {
         config.defaults.synapse = Some(domain.clone());
         if let Err(e) = config.save() {
-            return out.error("write_error", &e);
+            return out.error_hypha(&e);
         }
     }
 
@@ -129,7 +129,7 @@ pub fn handle_remove(out: &Output, domain: &str) -> ExitCode {
     }
 
     if let Err(e) = config::remove_synapse_node(domain) {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     // Clear default if it was this node
@@ -137,7 +137,7 @@ pub fn handle_remove(out: &Output, domain: &str) -> ExitCode {
     if cfg.defaults.synapse.as_deref() == Some(domain) {
         cfg.defaults.synapse = None;
         if let Err(e) = cfg.save() {
-            return out.error("write_error", &e);
+            return out.error_hypha(&e);
         }
     }
 
@@ -163,7 +163,7 @@ pub fn handle_use(out: &Output, domain: &str) -> ExitCode {
     cfg.defaults.synapse = Some(domain.to_string());
 
     if let Err(e) = cfg.save() {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     out.ok(json!({
@@ -195,7 +195,7 @@ pub fn handle_config(out: &Output, domain: &str, token_secret: Option<&str>) -> 
     }
 
     if let Err(e) = config::save_synapse_node(domain, &node) {
-        return out.error("write_error", &e);
+        return out.error_hypha(&e);
     }
 
     out.ok(json!({
@@ -212,7 +212,7 @@ pub async fn handle_discover(
 ) -> ExitCode {
     let resolved = match config::resolve_synapse(synapse, synapse_token_secret) {
         Ok(r) => r,
-        Err(e) => return out.error("synapse_error", &e),
+        Err(e) => return out.error_hypha(&e),
     };
 
     let client = match substrate::client::http_client(30) {

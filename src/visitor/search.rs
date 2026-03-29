@@ -43,7 +43,7 @@ pub async fn search_with_bond(
         crate::config::resolve_synapse(synapse_arg, synapse_token_secret).map_err(|e| {
             crate::HyphaError::with_hint(
                 "synapse_error",
-                &e,
+                e.to_string(),
                 "Add a synapse node with: hypha synapse add <url>",
             )
         })?;

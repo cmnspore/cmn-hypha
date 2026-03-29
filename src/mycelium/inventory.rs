@@ -13,7 +13,7 @@ pub fn handle_status(out: &Output, domain: Option<&str>, site_path: Option<&str>
     if let Some(domain) = domain {
         if site_path.is_none() {
             if let Err(e) = site::validate_site_domain_path(domain) {
-                return out.error("invalid_domain", &e);
+                return out.error_hypha(&e);
             }
         }
 

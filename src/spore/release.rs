@@ -20,12 +20,15 @@ pub enum ArchiveFormat {
 }
 
 impl ArchiveFormat {
-    pub(crate) fn from_str(s: &str) -> Result<Self, String> {
+    pub(crate) fn from_str(s: &str) -> Result<Self, crate::sink::HyphaError> {
         match s.to_lowercase().as_str() {
             "zstd" | "zst" => Ok(Self::Zstd),
-            _ => Err(format!(
-                "Unsupported archive format for release generation: {}. Use: zstd",
-                s
+            _ => Err(crate::sink::HyphaError::new(
+                "invalid_args",
+                format!(
+                    "Unsupported archive format for release generation: {}. Use: zstd",
+                    s
+                ),
             )),
         }
     }
@@ -61,14 +64,14 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
 
     if site_path.is_none() {
         if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error("invalid_domain", &e);
+            return out.error_hypha(&e);
         }
     }
 
     // Parse archive format
     let archive_format = match ArchiveFormat::from_str(archive) {
         Ok(f) => f,
-        Err(e) => return out.error("invalid_args", &e),
+        Err(e) => return out.error_hypha(&e),
     };
 
     // Validate distribution options

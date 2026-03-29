@@ -75,6 +75,22 @@ impl std::fmt::Display for HyphaError {
 
 impl std::error::Error for HyphaError {}
 
+impl From<String> for HyphaError {
+    fn from(msg: String) -> Self {
+        Self {
+            code: "error".to_string(),
+            message: msg,
+            hint: None,
+        }
+    }
+}
+
+impl From<&str> for HyphaError {
+    fn from(msg: &str) -> Self {
+        Self::from(msg.to_string())
+    }
+}
+
 /// Prints events as afdata JSON to stdout — used by the hypha CLI.
 pub struct AfDataSink;
 

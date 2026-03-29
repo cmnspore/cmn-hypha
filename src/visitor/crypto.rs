@@ -40,34 +40,52 @@ pub async fn get_cmn_entry(
 pub async fn fetch_spore_manifest(
     capsule: &substrate::CmnCapsuleEntry,
     hash: &str,
-) -> Result<serde_json::Value, String> {
-    let client = substrate::client::http_client(30)
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+) -> Result<serde_json::Value, crate::HyphaError> {
+    let client = substrate::client::http_client(30).map_err(|e| {
+        crate::HyphaError::new(
+            "manifest_failed",
+            format!("Failed to create HTTP client: {}", e),
+        )
+    })?;
     substrate::client::fetch_spore_manifest(&client, capsule, hash, Default::default())
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::HyphaError::new("manifest_failed", e.to_string()))
 }
 
 /// Verify `core_signature` for any signed capsule payload.
 pub(super) fn verify_manifest_core_signature(
     manifest: &serde_json::Value,
     public_key: &str,
-) -> Result<(), String> {
+) -> Result<(), crate::HyphaError> {
     substrate::decode_spore(manifest)
-        .map_err(|e| format!("Invalid spore manifest: {}", e))?
+        .map_err(|e| {
+            crate::HyphaError::new("sig_failed", format!("Invalid spore manifest: {}", e))
+        })?
         .verify_core_signature(public_key)
-        .map_err(|e| format!("Core signature verification failed: {}", e))
+        .map_err(|e| {
+            crate::HyphaError::new(
+                "sig_failed",
+                format!("Core signature verification failed: {}", e),
+            )
+        })
 }
 
 /// Verify `capsule_signature` for any signed capsule payload.
 pub(super) fn verify_manifest_capsule_signature(
     manifest: &serde_json::Value,
     public_key: &str,
-) -> Result<(), String> {
+) -> Result<(), crate::HyphaError> {
     substrate::decode_spore(manifest)
-        .map_err(|e| format!("Invalid spore manifest: {}", e))?
+        .map_err(|e| {
+            crate::HyphaError::new("sig_failed", format!("Invalid spore manifest: {}", e))
+        })?
         .verify_capsule_signature(public_key)
-        .map_err(|e| format!("Capsule signature verification failed: {}", e))
+        .map_err(|e| {
+            crate::HyphaError::new(
+                "sig_failed",
+                format!("Capsule signature verification failed: {}", e),
+            )
+        })
 }
 
 /// Verify both core_signature and capsule_signature using separate keys.
@@ -75,18 +93,20 @@ pub fn verify_manifest_two_key_signatures(
     manifest: &serde_json::Value,
     host_key: &str,
     author_key: &str,
-) -> Result<(), String> {
+) -> Result<(), crate::HyphaError> {
     substrate::decode_spore(manifest)
-        .map_err(|e| format!("Invalid spore manifest: {}", e))?
+        .map_err(|e| {
+            crate::HyphaError::new("sig_failed", format!("Invalid spore manifest: {}", e))
+        })?
         .verify_signatures(host_key, author_key)
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::HyphaError::new("sig_failed", e.to_string()))
 }
 
 /// Verify both signatures using a single key (self-hosted convenience wrapper).
 pub fn verify_manifest_both_signatures(
     manifest: &serde_json::Value,
     public_key: &str,
-) -> Result<(), String> {
+) -> Result<(), crate::HyphaError> {
     verify_manifest_two_key_signatures(manifest, public_key, public_key)
 }
 
@@ -353,16 +373,26 @@ async fn ask_synapse_key_trust(
     key: &str,
     domain: &str,
     token: Option<&str>,
-) -> Result<bool, String> {
-    let client = substrate::client::http_client(10)
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+) -> Result<bool, crate::HyphaError> {
+    let client = substrate::client::http_client(10).map_err(|e| {
+        crate::HyphaError::new(
+            "synapse_error",
+            format!("Failed to create HTTP client: {}", e),
+        )
+    })?;
     let resp =
         substrate::client::fetch_synapse_cmn(&client, synapse_url, domain, fetch_opts(token))
             .await
-            .map_err(|e| e.to_string())?;
-    let entry: substrate::CmnEntry = serde_json::from_value(resp.result.cmn)
-        .map_err(|e| format!("Failed to parse synapse cmn.json: {}", e))?;
-    let capsule = entry.primary_capsule().map_err(|e| e.to_string())?;
+            .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
+    let entry: substrate::CmnEntry = serde_json::from_value(resp.result.cmn).map_err(|e| {
+        crate::HyphaError::new(
+            "synapse_error",
+            format!("Failed to parse synapse cmn.json: {}", e),
+        )
+    })?;
+    let capsule = entry
+        .primary_capsule()
+        .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
     Ok(capsule.key == key)
 }
 
@@ -375,16 +405,19 @@ pub fn verify_content_hash(
     content_path: &Path,
     expected_hash: &str,
     manifest: &serde_json::Value,
-) -> Result<(), String> {
-    let spore =
-        substrate::decode_spore(manifest).map_err(|e| format!("Invalid spore manifest: {}", e))?;
+) -> Result<(), crate::HyphaError> {
+    let spore = substrate::decode_spore(manifest).map_err(|e| {
+        crate::HyphaError::new("hash_mismatch", format!("Invalid spore manifest: {}", e))
+    })?;
     let entries = crate::tree::walk_dir(
         content_path,
         &spore.tree().exclude_names,
         &spore.tree().follow_rules,
     )
-    .map_err(|e| format!("Failed to walk directory: {}", e))?;
+    .map_err(|e| {
+        crate::HyphaError::new("hash_mismatch", format!("Failed to walk directory: {}", e))
+    })?;
     spore
         .verify_content_hash_and_size(&entries, expected_hash)
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::HyphaError::new("hash_mismatch", e.to_string()))
 }

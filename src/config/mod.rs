@@ -113,13 +113,15 @@ impl HyphaConfig {
             Ok(content) => match toml::from_str(&content) {
                 Ok(cfg) => cfg,
                 Err(e) => {
-                    use std::io::Write;
-                    let _ = writeln!(
-                        std::io::stderr(),
-                        "error: failed to parse {}: {}\nhint: fix the file or remove it to use defaults",
-                        path.display(),
-                        e
-                    );
+                    #[allow(clippy::print_stdout)]
+                    {
+                        let v = agent_first_data::build_json_error(
+                            &format!("failed to parse {}: {}", path.display(), e),
+                            Some("fix the file or remove it to use defaults"),
+                            None,
+                        );
+                        println!("{}", agent_first_data::output_json(&v));
+                    }
                     std::process::exit(1);
                 }
             },

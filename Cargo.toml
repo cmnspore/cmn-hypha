@@ -18,7 +18,7 @@ name = "hypha"
 path = "src/main.rs"
 
 [dependencies]
-cmn-substrate = { version = "0.2", path = "../cmn-substrate", features = ["client-safe-dns", "archive-zstd"] }
+cmn-substrate = { version = "0.2", features = ["client-safe-dns", "archive-zstd"] }
 agent-first-data = { version = "0.7", features = ["cli-help", "cli-help-markdown"] }
 clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }

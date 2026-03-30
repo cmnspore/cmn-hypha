@@ -63,7 +63,7 @@ jobs:
             ARCHIVE="hypha-${TAG}-${{ matrix.target }}.tar.gz"
             tar -czf "$ARCHIVE" -C "$BIN_DIR" hypha
           fi
-          shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
+          sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256" 2>/dev/null || shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 

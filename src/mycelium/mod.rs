@@ -10,6 +10,7 @@ mod serve;
 
 pub use format::format_mycelium;
 pub use init::handle_init;
+pub(crate) use inventory::{find_local_spore_hash, resolve_spore_ref};
 pub use inventory::{handle_status, update_inventory};
 pub use nutrients::{handle_nutrient_add, handle_nutrient_clear, handle_nutrient_remove};
 pub use serve::{handle_pulse, handle_serve};
@@ -50,6 +51,15 @@ pub(crate) enum MyceliumError {
     Format(String),
 }
 
+impl From<auth::JsonSignError> for MyceliumError {
+    fn from(e: auth::JsonSignError) -> Self {
+        match e {
+            auth::JsonSignError::Jcs(message) => MyceliumError::Jcs(message),
+            auth::JsonSignError::Sign(err) => MyceliumError::Sign(err.to_string()),
+        }
+    }
+}
+
 impl MyceliumError {
     /// Return an error code suitable for Agent-First Data output.
     pub(crate) fn code(&self) -> &'static str {
@@ -79,11 +89,7 @@ fn sign_and_save_mycelium(
     mycelium.capsule.core.updated_at_epoch_ms = now_epoch_ms;
 
     // Sign core
-    let core_signature = match auth::sign_json_with_site(site, &mycelium.capsule.core) {
-        Ok(sig) => sig,
-        Err(auth::JsonSignError::Jcs(message)) => return Err(MyceliumError::Jcs(message)),
-        Err(auth::JsonSignError::Sign(err)) => return Err(MyceliumError::Sign(err.to_string())),
-    };
+    let core_signature = auth::sign_json_with_site(site, &mycelium.capsule.core)?;
     mycelium.capsule.core_signature = core_signature.clone();
 
     // Compute hash
@@ -93,11 +99,7 @@ fn sign_and_save_mycelium(
 
     // Write mycelium file
     mycelium.capsule.uri = build_mycelium_uri(domain, &mycelium_hash);
-    mycelium.capsule_signature = match auth::sign_json_with_site(site, &mycelium.capsule) {
-        Ok(sig) => sig,
-        Err(auth::JsonSignError::Jcs(message)) => return Err(MyceliumError::Jcs(message)),
-        Err(auth::JsonSignError::Sign(err)) => return Err(MyceliumError::Sign(err.to_string())),
-    };
+    mycelium.capsule_signature = auth::sign_json_with_site(site, &mycelium.capsule)?;
 
     let mycelium_dir = site.mycelium_dir();
     std::fs::create_dir_all(&mycelium_dir)?;
@@ -118,17 +120,27 @@ fn sign_and_save_mycelium(
             endpoint
         })
         .collect();
+    let existing_capsule = std::fs::read_to_string(site.cmn_json_path())
+        .ok()
+        .and_then(|content| serde_json::from_str::<CmnEntry>(&content).ok())
+        .and_then(|entry| entry.primary_capsule().ok().cloned());
+    let serial = existing_capsule
+        .as_ref()
+        .map(|capsule| capsule.serial.saturating_add(1))
+        .unwrap_or(1);
+    let history = existing_capsule
+        .as_ref()
+        .map(|capsule| capsule.history.clone())
+        .unwrap_or_default();
+
     let entry = CmnEntry::new(vec![CmnCapsuleEntry {
         uri: substrate::build_domain_uri(domain),
+        serial,
         key: identity.public_key.clone(),
-        previous_keys: vec![],
+        history,
         endpoints,
     }]);
-    let capsule_sig = match auth::sign_json_with_site(site, &entry.capsules) {
-        Ok(sig) => sig,
-        Err(auth::JsonSignError::Jcs(message)) => return Err(MyceliumError::Jcs(message)),
-        Err(auth::JsonSignError::Sign(err)) => return Err(MyceliumError::Sign(err.to_string())),
-    };
+    let capsule_sig = auth::sign_json_with_site(site, &entry.capsules)?;
     let signed_entry = CmnEntry {
         capsule_signature: capsule_sig,
         ..entry

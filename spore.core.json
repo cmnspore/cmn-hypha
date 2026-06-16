@@ -2,7 +2,7 @@
   "$schema": "https://cmn.dev/schemas/v1/spore-core.json",
   "id": "cmn-hypha",
   "name": "CMN Hypha",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "domain": "cmn.dev",
   "key": "ed25519.7BmCWmBb2YeUWR7pmHvwAvi9wRm96VpZsJvZFSTfc2Uu",
   "synopsis": "CMN reference client CLI — releases spores, queries synapses, resolves bonds, and manages the local mycelium",
@@ -12,22 +12,27 @@
   ],
   "license": "MIT",
   "mutations": [
-    "Unify error types with HyphaError across all modules — cache, sense, release — replacing ad-hoc string errors with structured machine-readable error codes",
-    "Add streaming archive download with progress reporting, replacing buffered full-file downloads",
-    "Use substrate TasteVerdictRecord for client-side taste caching instead of a hypha-specific duplicate type",
-    "Add Homebrew formula and Scoop manifest for cross-platform installation via package managers",
-    "Security and consistency improvements — field ordering, performance fixes, and convention compliance hardening"
+    "Harden the consume path against malicious or corrupt sources — content-verify replicated archives before re-publishing under your key, add git option-injection guards on refs/URLs, and a defense-in-depth path check at the archive write boundary",
+    "Implement client-side domain-state anti-rollback pinning for cmn.json — a per-domain serial/digest/key pin rejecting rollback, same-serial equivocation, implausible serial jumps, and unproven key changes; and re-verify cached cmn.json signatures on read to close a cache-poisoning gap",
+    "Strengthen spore verification — require core.key (dropping the legacy single-key fallback), confirm key trust against the spore author's own domain cache for replicates, and distinguish transient hash-compute failures from real content mismatches so an IO hiccup never blacklists a spore as toxic (and never emit toxic verdicts for unverified deliveries)",
+    "Make local state crash- and concurrency-safe — collision-proof atomic cache writes with directory fsync, locked read-modify-write for key-trust and status, and stage-then-swap archive grow that never leaves a half-updated working tree",
+    "Zeroize private-key material and permission-check the key on init; harden the local debug serve against symlink escapes with nosniff and streaming responses",
+    "Enforce the portable filename collision rule on receive (filename_portable_conflict), rejecting content valid on Git/Linux that would collapse on macOS/Windows before it touches disk",
+    "Tighten synapse endpoint validation — reject cleartext http (except .onion/.i2p) and other insecure schemes (ws/ftp), reject IP-literal URLs, validate the synapse host, and use constant-time comparison for synapse key-trust checks",
+    "Make delivery resilient and bounded — retry alternate archive endpoints after bad/corrupt content instead of failing or blacklisting the first source, and add explicit size limits to JSON/manifest fetches",
+    "Resolve the latest spore by id — address a bare cmn://domain/id and resolve to the newest spore via the domain mycelium inventory; validate --dist/--vcs/--direction at CLI parse time via enums",
+    "Add SECURITY.md documenting the two-tier key trust model, synapse second-class trust boundaries, sense-is-not-trust, token credential handling, and CMN_HOME isolation"
   ],
   "bonds": [
     {
       "relation": "depends_on",
-      "uri": "cmn://cmn.dev/b3.AdVmyL8CADo3wJ1za4UP1VKv68MBfmcd8fMKDg5JwPpi",
+      "uri": "cmn://cmn.dev/b3.q4WoPWAG2fXWtcgWsy1HL7qNx3ymZWCcxooFuG3hSTT",
       "id": "cmn-spec",
       "reason": "Implements the CMN protocol specification — reference client CLI"
     },
     {
       "relation": "depends_on",
-      "uri": "cmn://cmn.dev/b3.AgMr3xwC5DbTa1QWvDrqoLiVU2hCK5X2gto6uBHenGkH",
+      "uri": "cmn://agentfirstkit.com/b3.GaVdbmeb41ZKjcnnJ3YAQxYMV2WsjfAK4jsjrq2z8Dha",
       "id": "agent-first-data",
       "reason": "All CLI output and protocol fields use Agent-First Data suffix conventions"
     }

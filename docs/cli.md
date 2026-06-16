@@ -2,63 +2,47 @@
 
 # Hypha CLI Reference
 
-> Regenerate with `hypha --help-markdown`.
+> Regenerate with `hypha --help --recursive --output markdown`.
 
-# Command-Line Help for `hypha`
+# hypha - CMN Client - A bio-digital extension for Visitors to release and absorb Spores
 
-This document contains the help content for the `hypha` command-line program.
-
-**Command Overview:**
-
-* [`hypha`↴](#hypha)
-* [`hypha sense`↴](#hypha-sense)
-* [`hypha taste`↴](#hypha-taste)
-* [`hypha spawn`↴](#hypha-spawn)
-* [`hypha grow`↴](#hypha-grow)
-* [`hypha absorb`↴](#hypha-absorb)
-* [`hypha bond`↴](#hypha-bond)
-* [`hypha replicate`↴](#hypha-replicate)
-* [`hypha hatch`↴](#hypha-hatch)
-* [`hypha hatch bond`↴](#hypha-hatch-bond)
-* [`hypha hatch bond set`↴](#hypha-hatch-bond-set)
-* [`hypha hatch bond remove`↴](#hypha-hatch-bond-remove)
-* [`hypha hatch bond clear`↴](#hypha-hatch-bond-clear)
-* [`hypha hatch tree`↴](#hypha-hatch-tree)
-* [`hypha hatch tree set`↴](#hypha-hatch-tree-set)
-* [`hypha hatch tree show`↴](#hypha-hatch-tree-show)
-* [`hypha release`↴](#hypha-release)
-* [`hypha lineage`↴](#hypha-lineage)
-* [`hypha search`↴](#hypha-search)
-* [`hypha mycelium`↴](#hypha-mycelium)
-* [`hypha mycelium root`↴](#hypha-mycelium-root)
-* [`hypha mycelium status`↴](#hypha-mycelium-status)
-* [`hypha mycelium serve`↴](#hypha-mycelium-serve)
-* [`hypha mycelium nutrient`↴](#hypha-mycelium-nutrient)
-* [`hypha mycelium nutrient add`↴](#hypha-mycelium-nutrient-add)
-* [`hypha mycelium nutrient remove`↴](#hypha-mycelium-nutrient-remove)
-* [`hypha mycelium nutrient clear`↴](#hypha-mycelium-nutrient-clear)
-* [`hypha mycelium pulse`↴](#hypha-mycelium-pulse)
-* [`hypha synapse`↴](#hypha-synapse)
-* [`hypha synapse discover`↴](#hypha-synapse-discover)
-* [`hypha synapse list`↴](#hypha-synapse-list)
-* [`hypha synapse health`↴](#hypha-synapse-health)
-* [`hypha synapse add`↴](#hypha-synapse-add)
-* [`hypha synapse remove`↴](#hypha-synapse-remove)
-* [`hypha synapse use`↴](#hypha-synapse-use)
-* [`hypha synapse config`↴](#hypha-synapse-config)
-* [`hypha cache`↴](#hypha-cache)
-* [`hypha cache list`↴](#hypha-cache-list)
-* [`hypha cache clean`↴](#hypha-cache-clean)
-* [`hypha cache path`↴](#hypha-cache-path)
-* [`hypha config`↴](#hypha-config)
-* [`hypha config list`↴](#hypha-config-list)
-* [`hypha config set`↴](#hypha-config-set)
-
-## `hypha`
-
+```text
 CMN Client - A bio-digital extension for Visitors to release and absorb Spores
 
-**Usage:** `hypha [OPTIONS] <COMMAND>`
+Usage: hypha [OPTIONS] <COMMAND>
+
+Commands:
+  sense      Resolve a CMN URI and show metadata without downloading
+  taste      Evaluate spore: download for review, or record a verdict
+  spawn      Create a working copy of a spore (auto-detects best distribution format)
+  grow       Pull latest changes from spawn source via Synapse lineage
+  absorb     Prepare spores for AI-assisted merge
+  bond       Fetch all bonds from spore.core.json to .cmn/bonds/
+  replicate  Copy a spore to your domain (same hash, re-signed capsule)
+  hatch      Create or update spore.core.json in working directory
+  release    Sign and publish spore to mycelium site
+  lineage    Trace spore lineage: descendants (in, default) or ancestors (out)
+  search     Search for spores by keyword (semantic search via Synapse)
+  mycelium   Manage local mycelium site
+  synapse    Manage Synapse node connections
+  cache      Manage local cache
+  config     View or modify hypha configuration
+  skill      Install, uninstall, or inspect the bundled Hypha agent skill
+
+Options:
+  -o, --output <OUTPUT>
+          Output format: json (default), yaml, plain; help also accepts markdown
+
+          [default: json]
+
+      --log <LOG>
+          Log categories (comma-separated): startup, request, ...
+
+  -h, --help
+          Print help. Add --recursive to expand every nested subcommand; add --output json|yaml|markdown to render this help in another format.
+
+  -V, --version
+          Print version
 
 All output follows Agent-First Data format:
   {"code": "ok", "result": {...}, "trace": {...}}
@@ -69,59 +53,72 @@ Quick start (try with cmn.dev):
   hypha spawn cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2
   hypha cache list
 
-###### **Subcommands:**
+More help:
+  hypha <command> --help   Show one command layer
+  hypha --help --recursive Expand every command and flag
+  hypha --help --recursive --output markdown
+                            Generate recursive Markdown reference
+```
 
-* `sense` — Resolve a CMN URI and show metadata without downloading
-* `taste` — Evaluate spore: download for review, or record a verdict
-* `spawn` — Create a working copy of a spore (auto-detects best distribution format)
-* `grow` — Pull latest changes from spawn source via Synapse lineage
-* `absorb` — Prepare spores for AI-assisted merge
-* `bond` — Fetch all bonds from spore.core.json to .cmn/bonds/
-* `replicate` — Copy a spore to your domain (same hash, re-signed capsule)
-* `hatch` — Create or update spore.core.json in working directory
-* `release` — Sign and publish spore to mycelium site
-* `lineage` — Trace spore lineage: descendants (in, default) or ancestors (out)
-* `search` — Search for spores by keyword (semantic search via Synapse)
-* `mycelium` — Manage local mycelium site
-* `synapse` — Manage Synapse node connections
-* `cache` — Manage local cache
-* `config` — View or modify hypha configuration
+## hypha sense - Resolve a CMN URI and show metadata without downloading
 
-###### **Options:**
-
-* `-o`, `--output <OUTPUT>` — Output format
-
-  Default value: `json`
-* `--log <LOG>` — Log categories (comma-separated): startup, request, ...
-
-
-
-## `hypha sense`
-
+```text
 Resolve a CMN URI and show metadata without downloading
 
-**Usage:** `hypha sense <URI>`
+Usage: sense [OPTIONS] <URI>
+
+Arguments:
+  <URI>
+          CMN URI (cmn://DOMAIN or cmn://DOMAIN/HASH)
+
+Options:
+      --id <ID>
+          Spore id to resolve from the domain's latest mycelium inventory
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 URI types:
   cmn://DOMAIN                       List all spores on a site
   cmn://DOMAIN/HASH                  View a specific spore
+  cmn://DOMAIN --id SPORE_ID         View latest spore with id from a site
 
 Examples:
   hypha sense cmn://cmn.dev
+  hypha sense cmn://cmn.dev --id cmn-spec
   hypha sense cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2
   hypha sense cmn://cmn.dev -o yaml
+```
 
-###### **Arguments:**
+## hypha taste - Evaluate spore: download for review, or record a verdict
 
-* `<URI>` — CMN URI (cmn://DOMAIN or cmn://DOMAIN/HASH)
-
-
-
-## `hypha taste`
-
+```text
 Evaluate spore: download for review, or record a verdict
 
-**Usage:** `hypha taste [OPTIONS] <URI>`
+Usage: taste [OPTIONS] <URI>
+
+Arguments:
+  <URI>
+          CMN URI (e.g., cmn://cmn.dev/HASH)
+
+Options:
+      --verdict <VERDICT>
+          Record verdict: sweet, fresh, safe, rotten, or toxic
+
+      --notes <NOTES>
+          Notes about the verdict
+
+      --synapse <SYNAPSE>
+          Synapse URL to pull/share taste reports
+
+      --synapse-token-secret <SYNAPSE_TOKEN_SECRET>
+          Auth token for synapse (overrides configured token)
+
+      --domain <DOMAIN>
+          Domain to sign report with (requires --synapse and --verdict)
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Without --verdict: downloads the spore for local review.
 With --verdict: records a verdict (sweet, fresh, safe, rotten, toxic).
@@ -130,26 +127,38 @@ Examples:
   hypha taste cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2
   hypha taste cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 --verdict safe --notes "Reviewed: clean code"
   hypha taste cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 --verdict safe --domain cmn.dev --synapse https://synapse.cmn.dev
+```
 
-###### **Arguments:**
+## hypha spawn - Create a working copy of a spore (auto-detects best distribution format)
 
-* `<URI>` — CMN URI (e.g., cmn://cmn.dev/HASH)
-
-###### **Options:**
-
-* `--verdict <VERDICT>` — Record verdict: sweet, fresh, safe, rotten, or toxic
-* `--notes <NOTES>` — Notes about the verdict
-* `--synapse <SYNAPSE>` — Synapse URL to pull/share taste reports
-* `--synapse-token-secret <SYNAPSE_TOKEN_SECRET>` — Auth token for synapse (overrides configured token)
-* `--domain <DOMAIN>` — Domain to sign report with (requires --synapse and --verdict)
-
-
-
-## `hypha spawn`
-
+```text
 Create a working copy of a spore (auto-detects best distribution format)
 
-**Usage:** `hypha spawn [OPTIONS] <URI> [DIRECTORY]`
+Usage: spawn [OPTIONS] <URI> [DIRECTORY]
+
+Arguments:
+  <URI>
+          CMN URI (e.g., cmn://cmn.dev/HASH)
+
+  [DIRECTORY]
+          Target directory (default: ./<spore-id>)
+
+Options:
+      --vcs <TYPE>
+          Initialize version control after spawn (e.g., --vcs git)
+
+          [possible values: git, none]
+
+      --dist <SOURCE>
+          Preferred distribution source: archive (default) or git
+
+          [possible values: archive, git]
+
+      --bond
+          Fetch bonds after spawn
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Distribution sources (auto-detected):
   archive    Download .tar.zst archive (default, fastest)
@@ -159,25 +168,32 @@ Examples:
   hypha spawn cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2
   hypha spawn cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 my-project --vcs git
   hypha spawn cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 --dist git
+```
 
-###### **Arguments:**
+## hypha grow - Pull latest changes from spawn source via Synapse lineage
 
-* `<URI>` — CMN URI (e.g., cmn://cmn.dev/HASH)
-* `<DIRECTORY>` — Target directory (default: ./<spore-id>)
-
-###### **Options:**
-
-* `--vcs <TYPE>` — Initialize version control after spawn (e.g., --vcs git)
-* `--dist <SOURCE>` — Preferred distribution source: archive (default) or git
-* `--bond` — Fetch bonds after spawn
-
-
-
-## `hypha grow`
-
+```text
 Pull latest changes from spawn source via Synapse lineage
 
-**Usage:** `hypha grow [OPTIONS]`
+Usage: grow [OPTIONS]
+
+Options:
+      --dist <SOURCE>
+          Override distribution source: archive or git
+
+          [possible values: archive, git]
+
+      --synapse <SYNAPSE>
+          Synapse to query for updates (domain or URL)
+
+      --synapse-token-secret <SYNAPSE_TOKEN_SECRET>
+          Auth token for synapse (overrides configured token)
+
+      --bond
+          Also check depends_on/follows/extends bonds for updates via Synapse lineage, and fetch all bonds to .cmn/bonds/
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Run inside a previously spawned directory to update it.
 Uses Synapse lineage to discover newer versions from the same publisher.
@@ -191,21 +207,36 @@ Examples:
   hypha grow --dist git
   hypha grow --dist archive
   hypha grow --bond --synapse synapse.cmn.dev
+```
 
-###### **Options:**
+## hypha absorb - Prepare spores for AI-assisted merge
 
-* `--dist <SOURCE>` — Override distribution source: archive or git
-* `--synapse <SYNAPSE>` — Synapse to query for updates (domain or URL)
-* `--synapse-token-secret <SYNAPSE_TOKEN_SECRET>` — Auth token for synapse (overrides configured token)
-* `--bond` — Also check depends_on/follows/extends bonds for updates via Synapse lineage, and fetch all bonds to .cmn/bonds/
-
-
-
-## `hypha absorb`
-
+```text
 Prepare spores for AI-assisted merge
 
-**Usage:** `hypha absorb [OPTIONS] [URIS]...`
+Usage: absorb [OPTIONS] [URIS]...
+
+Arguments:
+  [URIS]...
+          CMN URIs to absorb (e.g., cmn://cmn.dev/HASH)
+
+Options:
+      --discover
+          Auto-discover descendants from current spore's spawned_from bonds
+
+      --synapse <SYNAPSE>
+          Synapse server URL (required with --discover)
+
+      --synapse-token-secret <SYNAPSE_TOKEN_SECRET>
+          Auth token for synapse (overrides configured token)
+
+      --max-depth <MAX_DEPTH>
+          Maximum depth for lineage discovery (default: 10)
+
+          [default: 10]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Absorb downloads spores into .cmn/absorb/ for AI-assisted merge.
 Use --discover to auto-discover descendants via Synapse.
@@ -214,45 +245,54 @@ Examples:
   hypha absorb cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2
   hypha absorb --discover --synapse https://synapse.cmn.dev
   hypha absorb --discover --synapse https://synapse.cmn.dev --max-depth 5
+```
 
-###### **Arguments:**
+## hypha bond - Fetch all bonds from spore.core.json to .cmn/bonds/
 
-* `<URIS>` — CMN URIs to absorb (e.g., cmn://cmn.dev/HASH)
-
-###### **Options:**
-
-* `--discover` — Auto-discover descendants from current spore's spawned_from bonds
-* `--synapse <SYNAPSE>` — Synapse server URL (required with --discover)
-* `--synapse-token-secret <SYNAPSE_TOKEN_SECRET>` — Auth token for synapse (overrides configured token)
-* `--max-depth <MAX_DEPTH>` — Maximum depth for lineage discovery (default: 10)
-
-  Default value: `10`
-
-
-
-## `hypha bond`
-
+```text
 Fetch all bonds from spore.core.json to .cmn/bonds/
 
-**Usage:** `hypha bond [OPTIONS]`
+Usage: bond [OPTIONS]
+
+Options:
+      --clean
+          Clean orphaned bonds not in spore.core.json
+
+      --status
+          Show bond status without fetching
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha bond
   hypha bond --status
   hypha bond --clean
+```
 
-###### **Options:**
+## hypha replicate - Copy a spore to your domain (same hash, re-signed capsule)
 
-* `--clean` — Clean orphaned bonds not in spore.core.json
-* `--status` — Show bond status without fetching
-
-
-
-## `hypha replicate`
-
+```text
 Copy a spore to your domain (same hash, re-signed capsule)
 
-**Usage:** `hypha replicate [OPTIONS] --domain <DOMAIN> [URIS]...`
+Usage: replicate [OPTIONS] --domain <DOMAIN> [URIS]...
+
+Arguments:
+  [URIS]...
+          CMN URI(s) to replicate
+
+Options:
+      --refs
+          Replicate all non-self bonds from spore.core.json
+
+      --domain <DOMAIN>
+          Target domain (required)
+
+      --site-path <SITE_PATH>
+          Custom site directory
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Replicates spores from another domain to yours. The hash stays the same
 because core + core_signature are preserved. Only capsule_signature changes.
@@ -260,25 +300,48 @@ because core + core_signature are preserved. Only capsule_signature changes.
 Examples:
   hypha replicate cmn://other.dev/HASH --domain my.dev
   hypha replicate --refs --domain my.dev
+```
 
-###### **Arguments:**
+## hypha hatch - Create or update spore.core.json in working directory
 
-* `<URIS>` — CMN URI(s) to replicate
-
-###### **Options:**
-
-* `--refs` — Replicate all non-self bonds from spore.core.json
-* `--domain <DOMAIN>` — Target domain (required)
-* `--site-path <SITE_PATH>` — Custom site directory
-
-
-
-## `hypha hatch`
-
+```text
 Create or update spore.core.json in working directory
 
-**Usage:** `hypha hatch [OPTIONS]
-       hatch <COMMAND>`
+Usage: hatch [OPTIONS]
+       hatch <COMMAND>
+
+Commands:
+  bond  Manage bonds in spore.core.json
+  tree  Manage tree configuration in spore.core.json
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+      --id <ID>
+          Opaque identifier stored in spore.core.json
+
+      --version <VERSION>
+          Version string (e.g., 1.0.0)
+
+      --name <NAME>
+          Display name
+
+      --domain <DOMAIN>
+          Publisher domain
+
+      --synopsis <SYNOPSIS>
+          Short description
+
+      --intent <INTENT>
+          Why this spore exists — permanent across releases (repeatable)
+
+      --mutations <MUTATIONS>
+          What changed relative to the spawned-from parent (repeatable)
+
+      --license <LICENSE>
+          License (SPDX identifier)
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha hatch --id my-tool --name "My Tool" --synopsis "A useful tool"
@@ -288,122 +351,172 @@ Examples:
 Subcommands:
   hypha hatch bond set/remove/clear   Manage bonds in spore.core.json
   hypha hatch tree set/show            Manage tree configuration
+```
 
-###### **Subcommands:**
+### hypha hatch bond - Manage bonds in spore.core.json
 
-* `bond` — Manage bonds in spore.core.json
-* `tree` — Manage tree configuration in spore.core.json
-
-###### **Options:**
-
-* `--id <ID>` — Opaque identifier stored in spore.core.json
-* `--version <VERSION>` — Version string (e.g., 1.0.0)
-* `--name <NAME>` — Display name
-* `--domain <DOMAIN>` — Publisher domain
-* `--synopsis <SYNOPSIS>` — Short description
-* `--intent <INTENT>` — Why this spore exists — permanent across releases (repeatable)
-* `--mutations <MUTATIONS>` — What changed relative to the spawned-from parent (repeatable)
-* `--license <LICENSE>` — License (SPDX identifier)
-
-
-
-## `hypha hatch bond`
-
+```text
 Manage bonds in spore.core.json
 
-**Usage:** `hypha hatch bond <COMMAND>`
+Usage: bond <COMMAND>
+
+Commands:
+  set     Add or update a bond (upsert by URI)
+  remove  Remove bonds by URI and/or relation
+  clear   Remove all bonds
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha hatch bond set --uri cmn://cmn.dev/b3.abc --relation follows --id my-lib --reason "Core library"
   hypha hatch bond set --uri cmn://cmn.dev/b3.abc --with 'mints=["https://mint.example.com"]'
   hypha hatch bond remove --relation follows
   hypha hatch bond clear
+```
 
-###### **Subcommands:**
+#### hypha hatch bond set - Add or update a bond (upsert by URI)
 
-* `set` — Add or update a bond (upsert by URI)
-* `remove` — Remove bonds by URI and/or relation
-* `clear` — Remove all bonds
-
-
-
-## `hypha hatch bond set`
-
+```text
 Add or update a bond (upsert by URI)
 
-**Usage:** `hypha hatch bond set [OPTIONS] --uri <URI>`
+Usage: set [OPTIONS] --uri <URI>
 
-###### **Options:**
+Options:
+      --uri <URI>
+          Bond URI (match key)
 
-* `--uri <URI>` — Bond URI (match key)
-* `--relation <RELATION>` — Bond relation (required for new bonds)
-* `--id <ID>` — Bond id
-* `--reason <REASON>` — Bond reason
-* `--with <KEY=VALUE>` — Bond parameters (KEY=VALUE, value is parsed as JSON; repeatable)
+      --relation <RELATION>
+          Bond relation (required for new bonds)
 
+      --id <ID>
+          Bond id
 
+      --reason <REASON>
+          Bond reason
 
-## `hypha hatch bond remove`
+      --with <KEY=VALUE>
+          Bond parameters (KEY=VALUE, value is parsed as JSON; repeatable)
 
+  -h, --help
+          Print help
+```
+
+#### hypha hatch bond remove - Remove bonds by URI and/or relation
+
+```text
 Remove bonds by URI and/or relation
 
-**Usage:** `hypha hatch bond remove [OPTIONS]`
+Usage: remove [OPTIONS]
 
-###### **Options:**
+Options:
+      --uri <URI>
+          Remove bonds matching this URI
 
-* `--uri <URI>` — Remove bonds matching this URI
-* `--relation <RELATION>` — Remove bonds matching this relation
+      --relation <RELATION>
+          Remove bonds matching this relation
 
+  -h, --help
+          Print help
+```
 
+#### hypha hatch bond clear - Remove all bonds
 
-## `hypha hatch bond clear`
-
+```text
 Remove all bonds
 
-**Usage:** `hypha hatch bond clear`
+Usage: clear
 
+Options:
+  -h, --help
+          Print help
+```
 
+### hypha hatch tree - Manage tree configuration in spore.core.json
 
-## `hypha hatch tree`
-
+```text
 Manage tree configuration in spore.core.json
 
-**Usage:** `hypha hatch tree <COMMAND>`
+Usage: tree <COMMAND>
 
-###### **Subcommands:**
+Commands:
+  set   Set tree configuration fields
+  show  Show current tree configuration
+  help  Print this message or the help of the given subcommand(s)
 
-* `set` — Set tree configuration fields
-* `show` — Show current tree configuration
+Options:
+  -h, --help
+          Print help
+```
 
+#### hypha hatch tree set - Set tree configuration fields
 
-
-## `hypha hatch tree set`
-
+```text
 Set tree configuration fields
 
-**Usage:** `hypha hatch tree set [OPTIONS]`
+Usage: set [OPTIONS]
 
-###### **Options:**
+Options:
+      --algorithm <ALGORITHM>
+          Hash algorithm (e.g., blob_tree_blake3_nfc)
 
-* `--algorithm <ALGORITHM>` — Hash algorithm (e.g., blob_tree_blake3_nfc)
-* `--exclude-names <EXCLUDE_NAMES>` — File/directory names to exclude from hashing (repeatable)
-* `--follow-rules <FOLLOW_RULES>` — Ignore-rule files to follow (repeatable)
+      --exclude-names <EXCLUDE_NAMES>...
+          File/directory names to exclude from hashing (repeatable)
 
+      --follow-rules <FOLLOW_RULES>...
+          Ignore-rule files to follow (repeatable)
 
+  -h, --help
+          Print help
+```
 
-## `hypha hatch tree show`
+#### hypha hatch tree show - Show current tree configuration
 
+```text
 Show current tree configuration
 
-**Usage:** `hypha hatch tree show`
+Usage: show
 
+Options:
+  -h, --help
+          Print help
+```
 
+## hypha release - Sign and publish spore to mycelium site
 
-## `hypha release`
-
+```text
 Sign and publish spore to mycelium site
 
-**Usage:** `hypha release [OPTIONS] --domain <DOMAIN>`
+Usage: release [OPTIONS] --domain <DOMAIN>
+
+Options:
+      --domain <DOMAIN>
+          Target domain (required)
+
+      --source <SOURCE>
+          Spore source directory (default: current directory)
+
+      --site-path <SITE_PATH>
+          Custom site directory (default: ~/.cmn/mycelium/<domain>)
+
+      --dist-git <DIST_GIT>
+          External git repository URL
+
+      --dist-ref <DIST_REF>
+          Git ref: tag/branch/commit (requires --dist-git)
+
+      --archive <FORMAT>
+          Archive format for release generation (currently only: zstd)
+
+          [default: zstd]
+
+      --dry-run
+          Pre-compute URI without writing any files
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Requires `hypha mycelium root` first to set up the site.
 
@@ -413,26 +526,38 @@ Examples:
   hypha release --domain cmn.dev --dry-run          # pre-compute URI without releasing
   hypha release --domain cmn.dev --archive zstd
   hypha release --domain cmn.dev --dist-git https://github.com/user/repo --dist-ref v1.0
+```
 
-###### **Options:**
+## hypha lineage - Trace spore lineage: descendants (in, default) or ancestors (out)
 
-* `--domain <DOMAIN>` — Target domain (required)
-* `--source <SOURCE>` — Spore source directory (default: current directory)
-* `--site-path <SITE_PATH>` — Custom site directory (default: ~/.cmn/mycelium/<domain>)
-* `--dist-git <DIST_GIT>` — External git repository URL
-* `--dist-ref <DIST_REF>` — Git ref: tag/branch/commit (requires --dist-git)
-* `--archive <FORMAT>` — Archive format for release generation (currently only: zstd)
-
-  Default value: `zstd`
-* `--dry-run` — Pre-compute URI without writing any files
-
-
-
-## `hypha lineage`
-
+```text
 Trace spore lineage: descendants (in, default) or ancestors (out)
 
-**Usage:** `hypha lineage [OPTIONS] <URI>`
+Usage: lineage [OPTIONS] <URI>
+
+Arguments:
+  <URI>
+          CMN URI (e.g., cmn://cmn.dev/HASH)
+
+Options:
+      --direction <DIRECTION>
+          Direction: in (descendants, default) or out (ancestors)
+
+          [possible values: in, out]
+
+      --synapse <SYNAPSE>
+          Synapse server (domain or URL, default: configured default)
+
+      --synapse-token-secret <SYNAPSE_TOKEN_SECRET>
+          Auth token for synapse (overrides configured token)
+
+      --max-depth <MAX_DEPTH>
+          Maximum traversal depth (default: 10)
+
+          [default: 10]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Direction:
   --direction in   Find descendants / forks (default)
@@ -442,72 +567,102 @@ Examples:
   hypha lineage cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 --synapse https://synapse.cmn.dev
   hypha lineage cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 --direction out --synapse https://synapse.cmn.dev
   hypha lineage cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 --synapse https://synapse.cmn.dev --max-depth 5
+```
 
-###### **Arguments:**
+## hypha search - Search for spores by keyword (semantic search via Synapse)
 
-* `<URI>` — CMN URI (e.g., cmn://cmn.dev/HASH)
-
-###### **Options:**
-
-* `--direction <DIRECTION>` — Direction: in (descendants, default) or out (ancestors)
-* `--synapse <SYNAPSE>` — Synapse server (domain or URL, default: configured default)
-* `--synapse-token-secret <SYNAPSE_TOKEN_SECRET>` — Auth token for synapse (overrides configured token)
-* `--max-depth <MAX_DEPTH>` — Maximum traversal depth (default: 10)
-
-  Default value: `10`
-
-
-
-## `hypha search`
-
+```text
 Search for spores by keyword (semantic search via Synapse)
 
-**Usage:** `hypha search [OPTIONS] <QUERY>`
+Usage: search [OPTIONS] <QUERY>
+
+Arguments:
+  <QUERY>
+          Search query text
+
+Options:
+      --synapse <SYNAPSE>
+          Synapse server (domain or URL, default: configured default)
+
+      --synapse-token-secret <SYNAPSE_TOKEN_SECRET>
+          Auth token for synapse (overrides configured token)
+
+      --domain <DOMAIN>
+          Filter by domain
+
+      --license <LICENSE>
+          Filter by license (SPDX identifier)
+
+      --bonds <BONDS>
+          Filter by bond relationship (format: relation:uri, comma-separated for AND)
+
+      --limit <LIMIT>
+          Maximum results (default: 20)
+
+          [default: 20]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha search "protocol spec" --synapse https://synapse.cmn.dev
   hypha search "data format" --synapse https://synapse.cmn.dev --domain cmn.dev
   hypha search "agent tools" --synapse https://synapse.cmn.dev --license MIT --limit 5
   hypha search "http client" --bonds spawned_from:cmn://cmn.dev/b3.abc123
+```
 
-###### **Arguments:**
+## hypha mycelium - Manage local mycelium site
 
-* `<QUERY>` — Search query text
-
-###### **Options:**
-
-* `--synapse <SYNAPSE>` — Synapse server (domain or URL, default: configured default)
-* `--synapse-token-secret <SYNAPSE_TOKEN_SECRET>` — Auth token for synapse (overrides configured token)
-* `--domain <DOMAIN>` — Filter by domain
-* `--license <LICENSE>` — Filter by license (SPDX identifier)
-* `--bonds <BONDS>` — Filter by bond relationship (format: relation:uri, comma-separated for AND)
-* `--limit <LIMIT>` — Maximum results (default: 20)
-
-  Default value: `20`
-
-
-
-## `hypha mycelium`
-
+```text
 Manage local mycelium site
 
-**Usage:** `hypha mycelium <COMMAND>`
+Usage: mycelium <COMMAND>
 
-###### **Subcommands:**
+Commands:
+  root      Establish a new site for a domain (or update existing)
+  status    Show site status
+  serve     Start a local HTTP server to serve the site (for debugging)
+  nutrient  Manage nutrient methods (add/remove/clear)
+  pulse     Send a pulse to a synapse indexer
+  help      Print this message or the help of the given subcommand(s)
 
-* `root` — Establish a new site for a domain (or update existing)
-* `status` — Show site status
-* `serve` — Start a local HTTP server to serve the site (for debugging)
-* `nutrient` — Manage nutrient methods (add/remove/clear)
-* `pulse` — Send a pulse to a synapse indexer
+Options:
+  -h, --help
+          Print help
+```
 
+### hypha mycelium root - Establish a new site for a domain (or update existing)
 
-
-## `hypha mycelium root`
-
+```text
 Establish a new site for a domain (or update existing)
 
-**Usage:** `hypha mycelium root [OPTIONS] [DOMAIN]`
+Usage: root [OPTIONS] [DOMAIN]
+
+Arguments:
+  [DOMAIN]
+          Domain name (auto-computed when --hub is used)
+
+Options:
+      --hub <HUB>
+          Hub domain (e.g., cmnhub.com). Generates a key, computes subdomain from pubkey (ed-<base32>), and sets domain + endpoints automatically
+
+      --site-path <SITE_PATH>
+          Custom site directory (default: ~/.cmn/mycelium/<domain>)
+
+      --name <NAME>
+          Site or author name
+
+      --synopsis <SYNOPSIS>
+          Brief description of the site or author
+
+      --bio <BIO>
+          Bio (markdown)
+
+      --endpoints-base <ENDPOINTS_BASE>
+          Base URL for endpoints (e.g., https://example.com)
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Creates ~/.cmn/mycelium/<domain>/ with key pair and site structure.
 Run this once before `hypha release`.
@@ -529,372 +684,462 @@ Examples:
   hypha mycelium root cmn.dev --endpoints-base https://cmn.dev
   hypha mycelium root example.com --site-path /custom/path
   hypha mycelium root --hub cmnhub.com
+```
 
-###### **Arguments:**
+### hypha mycelium status - Show site status
 
-* `<DOMAIN>` — Domain name (auto-computed when --hub is used)
-
-###### **Options:**
-
-* `--hub <HUB>` — Hub domain (e.g., cmnhub.com). Generates a key, computes subdomain from pubkey (ed-<base32>), and sets domain + endpoints automatically
-* `--site-path <SITE_PATH>` — Custom site directory (default: ~/.cmn/mycelium/<domain>)
-* `--name <NAME>` — Site or author name
-* `--synopsis <SYNOPSIS>` — Brief description of the site or author
-* `--bio <BIO>` — Bio (markdown)
-* `--endpoints-base <ENDPOINTS_BASE>` — Base URL for endpoints (e.g., https://example.com)
-
-
-
-## `hypha mycelium status`
-
+```text
 Show site status
 
-**Usage:** `hypha mycelium status [OPTIONS] [DOMAIN]`
+Usage: status [OPTIONS] [DOMAIN]
+
+Arguments:
+  [DOMAIN]
+          Domain name (optional, lists all if not specified)
+
+Options:
+      --site-path <SITE_PATH>
+          Custom site directory
+
+      --id <ID>
+          Spore id to resolve from the local mycelium inventory
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha mycelium status
   hypha mycelium status cmn.dev
+  hypha mycelium status cmn.dev --id cmn-spec --site-path deploy/cmn.dev
+```
 
-###### **Arguments:**
+### hypha mycelium serve - Start a local HTTP server to serve the site (for debugging)
 
-* `<DOMAIN>` — Domain name (optional, lists all if not specified)
-
-###### **Options:**
-
-* `--site-path <SITE_PATH>` — Custom site directory
-
-
-
-## `hypha mycelium serve`
-
+```text
 Start a local HTTP server to serve the site (for debugging)
 
-**Usage:** `hypha mycelium serve [OPTIONS] [DOMAIN]`
+Usage: serve [OPTIONS] [DOMAIN]
+
+Arguments:
+  [DOMAIN]
+          Domain name
+
+Options:
+      --site-path <SITE_PATH>
+          Custom site directory
+
+      --port <PORT>
+          Port to listen on (default: 8080)
+
+          [default: 8080]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha mycelium serve
   hypha mycelium serve cmn.dev --port 3000
+```
 
-###### **Arguments:**
+### hypha mycelium nutrient - Manage nutrient methods (add/remove/clear)
 
-* `<DOMAIN>` — Domain name
-
-###### **Options:**
-
-* `--site-path <SITE_PATH>` — Custom site directory
-* `--port <PORT>` — Port to listen on (default: 8080)
-
-  Default value: `8080`
-
-
-
-## `hypha mycelium nutrient`
-
+```text
 Manage nutrient methods (add/remove/clear)
 
-**Usage:** `hypha mycelium nutrient <COMMAND>`
+Usage: nutrient <COMMAND>
+
+Commands:
+  add     Add or update a nutrient method (upsert by type)
+  remove  Remove a nutrient method by type
+  clear   Remove all nutrient methods
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha mycelium nutrient add cmn.dev --type lightning_address --with address=user@example.com
   hypha mycelium nutrient add cmn.dev --type url --with url=https://example.com --with label=Donate
   hypha mycelium nutrient remove cmn.dev --type url
   hypha mycelium nutrient clear cmn.dev
+```
 
-###### **Subcommands:**
+#### hypha mycelium nutrient add - Add or update a nutrient method (upsert by type)
 
-* `add` — Add or update a nutrient method (upsert by type)
-* `remove` — Remove a nutrient method by type
-* `clear` — Remove all nutrient methods
-
-
-
-## `hypha mycelium nutrient add`
-
+```text
 Add or update a nutrient method (upsert by type)
 
-**Usage:** `hypha mycelium nutrient add [OPTIONS] --type <TYPE> <DOMAIN>`
+Usage: add [OPTIONS] --type <TYPE> <DOMAIN>
 
-###### **Arguments:**
+Arguments:
+  <DOMAIN>
+          Domain name
 
-* `<DOMAIN>` — Domain name
+Options:
+      --type <TYPE>
+          Nutrient method type (e.g., lightning_address, url, evm, solana)
 
-###### **Options:**
+      --with <KEY=VALUE>
+          Nutrient parameters (KEY=VALUE, value is parsed as JSON; repeatable)
 
-* `--type <TYPE>` — Nutrient method type (e.g., lightning_address, url, evm, solana)
-* `--with <KEY=VALUE>` — Nutrient parameters (KEY=VALUE, value is parsed as JSON; repeatable)
-* `--site-path <SITE_PATH>` — Custom site directory
+      --site-path <SITE_PATH>
+          Custom site directory
 
+  -h, --help
+          Print help
+```
 
+#### hypha mycelium nutrient remove - Remove a nutrient method by type
 
-## `hypha mycelium nutrient remove`
-
+```text
 Remove a nutrient method by type
 
-**Usage:** `hypha mycelium nutrient remove [OPTIONS] --type <TYPE> <DOMAIN>`
+Usage: remove [OPTIONS] --type <TYPE> <DOMAIN>
 
-###### **Arguments:**
+Arguments:
+  <DOMAIN>
+          Domain name
 
-* `<DOMAIN>` — Domain name
+Options:
+      --type <TYPE>
+          Nutrient method type to remove
 
-###### **Options:**
+      --site-path <SITE_PATH>
+          Custom site directory
 
-* `--type <TYPE>` — Nutrient method type to remove
-* `--site-path <SITE_PATH>` — Custom site directory
+  -h, --help
+          Print help
+```
 
+#### hypha mycelium nutrient clear - Remove all nutrient methods
 
-
-## `hypha mycelium nutrient clear`
-
+```text
 Remove all nutrient methods
 
-**Usage:** `hypha mycelium nutrient clear [OPTIONS] <DOMAIN>`
+Usage: clear [OPTIONS] <DOMAIN>
 
-###### **Arguments:**
+Arguments:
+  <DOMAIN>
+          Domain name
 
-* `<DOMAIN>` — Domain name
+Options:
+      --site-path <SITE_PATH>
+          Custom site directory
 
-###### **Options:**
+  -h, --help
+          Print help
+```
 
-* `--site-path <SITE_PATH>` — Custom site directory
+### hypha mycelium pulse - Send a pulse to a synapse indexer
 
-
-
-## `hypha mycelium pulse`
-
+```text
 Send a pulse to a synapse indexer
 
-**Usage:** `hypha mycelium pulse [OPTIONS] --file <FILE>`
+Usage: pulse [OPTIONS] --file <FILE>
+
+Options:
+      --synapse <SYNAPSE>
+          Synapse server (domain or URL, default: configured default)
+
+      --synapse-token-secret <SYNAPSE_TOKEN_SECRET>
+          Auth token for synapse (overrides configured token)
+
+      --file <FILE>
+          Path to signed mycelium.json
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha mycelium pulse --synapse synapse.cmn.dev --file ~/.cmn/mycelium/cmn.dev/public/cmn/mycelium/<hash>.json
   hypha mycelium pulse --synapse https://synapse.cmn.dev --file ~/.cmn/mycelium/cmn.dev/public/cmn/mycelium/<hash>.json
+```
 
-###### **Options:**
+## hypha synapse - Manage Synapse node connections
 
-* `--synapse <SYNAPSE>` — Synapse server (domain or URL, default: configured default)
-* `--synapse-token-secret <SYNAPSE_TOKEN_SECRET>` — Auth token for synapse (overrides configured token)
-* `--file <FILE>` — Path to signed mycelium.json
-
-
-
-## `hypha synapse`
-
+```text
 Manage Synapse node connections
 
-**Usage:** `hypha synapse <COMMAND>`
+Usage: synapse <COMMAND>
 
-###### **Subcommands:**
+Commands:
+  discover  Discover Synapse instances via the network
+  list      List configured Synapse nodes
+  health    Check health of a Synapse instance
+  add       Add a Synapse node
+  remove    Remove a Synapse node
+  use       Set default Synapse node
+  config    Configure a Synapse node (token, etc.)
+  help      Print this message or the help of the given subcommand(s)
 
-* `discover` — Discover Synapse instances via the network
-* `list` — List configured Synapse nodes
-* `health` — Check health of a Synapse instance
-* `add` — Add a Synapse node
-* `remove` — Remove a Synapse node
-* `use` — Set default Synapse node
-* `config` — Configure a Synapse node (token, etc.)
+Options:
+  -h, --help
+          Print help
+```
 
+### hypha synapse discover - Discover Synapse instances via the network
 
-
-## `hypha synapse discover`
-
+```text
 Discover Synapse instances via the network
 
-**Usage:** `hypha synapse discover [OPTIONS]`
+Usage: discover [OPTIONS]
+
+Options:
+      --synapse <SYNAPSE>
+          Synapse to query (domain or URL, default: configured default)
+
+      --synapse-token-secret <SYNAPSE_TOKEN_SECRET>
+          Auth token for synapse (overrides configured token)
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha synapse discover
   hypha synapse discover --synapse https://synapse.cmn.dev
+```
 
-###### **Options:**
+### hypha synapse list - List configured Synapse nodes
 
-* `--synapse <SYNAPSE>` — Synapse to query (domain or URL, default: configured default)
-* `--synapse-token-secret <SYNAPSE_TOKEN_SECRET>` — Auth token for synapse (overrides configured token)
-
-
-
-## `hypha synapse list`
-
+```text
 List configured Synapse nodes
 
-**Usage:** `hypha synapse list`
+Usage: list
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha synapse list
+```
 
+### hypha synapse health - Check health of a Synapse instance
 
-
-## `hypha synapse health`
-
+```text
 Check health of a Synapse instance
 
-**Usage:** `hypha synapse health [OPTIONS] [SYNAPSE]`
+Usage: health [OPTIONS] [SYNAPSE]
+
+Arguments:
+  [SYNAPSE]
+          Synapse domain or URL (default: configured default)
+
+Options:
+      --synapse-token-secret <SYNAPSE_TOKEN_SECRET>
+          Auth token for synapse (overrides configured token)
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha synapse health
   hypha synapse health synapse.cmn.dev
   hypha synapse health https://synapse.cmn.dev
+```
 
-###### **Arguments:**
+### hypha synapse add - Add a Synapse node
 
-* `<SYNAPSE>` — Synapse domain or URL (default: configured default)
-
-###### **Options:**
-
-* `--synapse-token-secret <SYNAPSE_TOKEN_SECRET>` — Auth token for synapse (overrides configured token)
-
-
-
-## `hypha synapse add`
-
+```text
 Add a Synapse node
 
-**Usage:** `hypha synapse add <URL>`
+Usage: add <URL>
+
+Arguments:
+  <URL>
+          Synapse URL
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha synapse add https://synapse.cmn.dev
+```
 
-###### **Arguments:**
+### hypha synapse remove - Remove a Synapse node
 
-* `<URL>` — Synapse URL
-
-
-
-## `hypha synapse remove`
-
+```text
 Remove a Synapse node
 
-**Usage:** `hypha synapse remove <DOMAIN>`
+Usage: remove <DOMAIN>
+
+Arguments:
+  <DOMAIN>
+          Synapse domain
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha synapse remove synapse.cmn.dev
+```
 
-###### **Arguments:**
+### hypha synapse use - Set default Synapse node
 
-* `<DOMAIN>` — Synapse domain
-
-
-
-## `hypha synapse use`
-
+```text
 Set default Synapse node
 
-**Usage:** `hypha synapse use <DOMAIN>`
+Usage: use <DOMAIN>
+
+Arguments:
+  <DOMAIN>
+          Synapse domain
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha synapse use synapse.cmn.dev
+```
 
-###### **Arguments:**
+### hypha synapse config - Configure a Synapse node (token, etc.)
 
-* `<DOMAIN>` — Synapse domain
-
-
-
-## `hypha synapse config`
-
+```text
 Configure a Synapse node (token, etc.)
 
-**Usage:** `hypha synapse config [OPTIONS] <DOMAIN>`
+Usage: config [OPTIONS] <DOMAIN>
+
+Arguments:
+  <DOMAIN>
+          Synapse domain
+
+Options:
+      --token-secret <TOKEN_SECRET>
+          Auth token (use empty string to clear)
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha synapse config synapse.cmn.dev --token-secret sk-abc123
   hypha synapse config synapse.cmn.dev --token-secret ""    # clear token
+```
 
-###### **Arguments:**
+## hypha cache - Manage local cache
 
-* `<DOMAIN>` — Synapse domain
-
-###### **Options:**
-
-* `--token-secret <TOKEN_SECRET>` — Auth token (use empty string to clear)
-
-
-
-## `hypha cache`
-
+```text
 Manage local cache
 
-**Usage:** `hypha cache <COMMAND>`
+Usage: cache <COMMAND>
 
-###### **Subcommands:**
+Commands:
+  list   List all cached spores
+  clean  Remove old or all cached items
+  path   Show local filesystem path for a cached spore
+  help   Print this message or the help of the given subcommand(s)
 
-* `list` — List all cached spores
-* `clean` — Remove old or all cached items
-* `path` — Show local filesystem path for a cached spore
+Options:
+  -h, --help
+          Print help
+```
 
+### hypha cache list - List all cached spores
 
-
-## `hypha cache list`
-
+```text
 List all cached spores
 
-**Usage:** `hypha cache list`
+Usage: list
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha cache list
   hypha cache list -o yaml
+```
 
+### hypha cache clean - Remove old or all cached items
 
-
-## `hypha cache clean`
-
+```text
 Remove old or all cached items
 
-**Usage:** `hypha cache clean [OPTIONS]`
+Usage: clean [OPTIONS]
+
+Options:
+      --all
+          Remove all cached items
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha cache clean --all
+```
 
-###### **Options:**
+### hypha cache path - Show local filesystem path for a cached spore
 
-* `--all` — Remove all cached items
-
-
-
-## `hypha cache path`
-
+```text
 Show local filesystem path for a cached spore
 
-**Usage:** `hypha cache path <URI>`
+Usage: path <URI>
+
+Arguments:
+  <URI>
+          CMN URI (e.g., cmn://cmn.dev/HASH)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha cache path cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2
+```
 
-###### **Arguments:**
+## hypha config - View or modify hypha configuration
 
-* `<URI>` — CMN URI (e.g., cmn://cmn.dev/HASH)
-
-
-
-## `hypha config`
-
+```text
 View or modify hypha configuration
 
-**Usage:** `hypha config <COMMAND>`
+Usage: config <COMMAND>
 
-###### **Subcommands:**
+Commands:
+  list  Show current configuration (merged defaults + config.toml)
+  set   Set a configuration value
+  help  Print this message or the help of the given subcommand(s)
 
-* `list` — Show current configuration (merged defaults + config.toml)
-* `set` — Set a configuration value
+Options:
+  -h, --help
+          Print help
+```
 
+### hypha config list - Show current configuration (merged defaults + config.toml)
 
-
-## `hypha config list`
-
+```text
 Show current configuration (merged defaults + config.toml)
 
-**Usage:** `hypha config list`
+Usage: list
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Examples:
   hypha config list
   hypha config list -o yaml
+```
 
+### hypha config set - Set a configuration value
 
-
-## `hypha config set`
-
+```text
 Set a configuration value
 
-**Usage:** `hypha config set <KEY> <VALUE>`
+Usage: set <KEY> <VALUE>
+
+Arguments:
+  <KEY>
+          Config key (dotted path, e.g. cache.cmn_ttl_s)
+
+  <VALUE>
+          Value to set
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 
 Dotted keys map to TOML sections:
   cache.path            Custom cache directory
@@ -904,6 +1149,16 @@ Dotted keys map to TOML sections:
                         Key trust refresh mode: expired | always | offline
   cache.key_trust_synapse_witness_mode
                         Key trust fallback when domain is offline: allow | require_domain
+  cache.spore_max_download_bytes
+                        Max spore archive download bytes
+  cache.spore_max_extract_bytes
+                        Max total bytes extracted from a spore archive
+  cache.spore_max_extract_files
+                        Max files extracted from a spore archive
+  cache.spore_max_extract_file_bytes
+                        Max bytes extracted for one spore archive file
+  cache.spore_reject_path_components
+                        TOML string array of protected received path components
   cache.clock_skew_tolerance_s
                         Clock skew tolerance in seconds for key trust TTL (default: 300)
   defaults.synapse      Default synapse domain
@@ -917,12 +1172,124 @@ Examples:
   hypha config set cache.key_trust_ttl_s 604800
   hypha config set cache.key_trust_refresh_mode offline
   hypha config set cache.key_trust_synapse_witness_mode require_domain
+  hypha config set cache.spore_max_download_bytes 1073741824
+  hypha config set cache.spore_reject_path_components '[".git", ".cmn"]'
   hypha config set cache.path /tmp/hypha-cache
   hypha config set defaults.synapse synapse.cmn.dev
   hypha config set defaults.taste.synapse cmnhub.com
   hypha config set defaults.taste.domain ed-xxx.cmnhub.com
+```
 
-###### **Arguments:**
+## hypha skill - Install, uninstall, or inspect the bundled Hypha agent skill
 
-* `<KEY>` — Config key (dotted path, e.g. cache.cmn_ttl_s)
-* `<VALUE>` — Value to set
+```text
+Install, uninstall, or inspect the bundled Hypha agent skill
+
+Usage: skill <COMMAND>
+
+Commands:
+  status     Report whether the bundled Hypha skill is installed and current
+  install    Install or refresh the bundled Hypha skill
+  uninstall  Remove the bundled Hypha skill
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+Examples:
+  hypha skill status
+  hypha skill install --agent codex
+  hypha skill install --agent claude-code --scope project
+  hypha skill uninstall --agent opencode --skills-dir /tmp/skills --force
+```
+
+### hypha skill status - Report whether the bundled Hypha skill is installed and current
+
+```text
+Report whether the bundled Hypha skill is installed and current
+
+Usage: status [OPTIONS]
+
+Options:
+      --agent <AGENT>
+          Agent target to manage
+
+          [default: all]
+          [possible values: all, codex, claude-code, opencode]
+
+      --scope <SCOPE>
+          Install scope
+
+          [default: personal]
+          [possible values: personal, project]
+
+      --skills-dir <SKILLS_DIR>
+          Explicit skills directory; requires a single --agent
+
+      --force
+          Overwrite or remove an unmanaged skill at the target path
+
+  -h, --help
+          Print help
+```
+
+### hypha skill install - Install or refresh the bundled Hypha skill
+
+```text
+Install or refresh the bundled Hypha skill
+
+Usage: install [OPTIONS]
+
+Options:
+      --agent <AGENT>
+          Agent target to manage
+
+          [default: all]
+          [possible values: all, codex, claude-code, opencode]
+
+      --scope <SCOPE>
+          Install scope
+
+          [default: personal]
+          [possible values: personal, project]
+
+      --skills-dir <SKILLS_DIR>
+          Explicit skills directory; requires a single --agent
+
+      --force
+          Overwrite or remove an unmanaged skill at the target path
+
+  -h, --help
+          Print help
+```
+
+### hypha skill uninstall - Remove the bundled Hypha skill
+
+```text
+Remove the bundled Hypha skill
+
+Usage: uninstall [OPTIONS]
+
+Options:
+      --agent <AGENT>
+          Agent target to manage
+
+          [default: all]
+          [possible values: all, codex, claude-code, opencode]
+
+      --scope <SCOPE>
+          Install scope
+
+          [default: personal]
+          [possible values: personal, project]
+
+      --skills-dir <SKILLS_DIR>
+          Explicit skills directory; requires a single --agent
+
+      --force
+          Overwrite or remove an unmanaged skill at the target path
+
+  -h, --help
+          Print help
+```

@@ -15,19 +15,5 @@ pub fn compute_updated_at_ms(
 }
 
 fn git_last_commit_ms(path: &Path) -> Option<u64> {
-    let output = std::process::Command::new("git")
-        .args(["log", "-1", "--format=%ct", "--", "."])
-        .current_dir(path)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let s = std::str::from_utf8(&output.stdout).ok()?.trim();
-    let epoch_s: u64 = s.parse().ok()?;
-    Some(epoch_s * 1000)
+    crate::git::last_commit_epoch_ms(path)
 }

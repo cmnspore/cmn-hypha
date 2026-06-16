@@ -8,6 +8,7 @@ pub mod mycelium;
 pub mod output;
 pub mod sink;
 pub mod site;
+pub mod skill_admin;
 pub mod spore;
 pub mod synapse;
 mod time;
@@ -23,5 +24,5 @@ pub use output::{
 pub use sink::{AfDataSink, EventSink, HyphaError, HyphaEvent, NoopSink};
 pub use visitor::{
     absorb, bond_fetch, check_taste, grow, lineage_in, lineage_out, search, search_with_bond,
-    sense, spawn, taste, verify_content_hash,
+    sense, sense_with_id, spawn, taste, verify_content_hash,
 };

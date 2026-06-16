@@ -1,4 +1,5 @@
 use super::*;
+use substrate::client::BondNode;
 
 #[derive(serde::Serialize)]
 struct BondUpdate {
@@ -17,42 +18,32 @@ pub(super) async fn check_for_update(
     synapse_token: Option<&str>,
     sink: &dyn crate::EventSink,
 ) -> Result<Option<(String, String)>, crate::HyphaError> {
-    let new_hash = match find_latest_version(synapse_url, current_hash, domain, synapse_token).await
-    {
-        Ok(Some(node)) => {
-            let parsed = CmnUri::parse(&node.uri).map_err(|e| {
-                crate::HyphaError::new("lineage_error", format!("Invalid lineage URI: {}", e))
-            })?;
-            match parsed.hash {
-                Some(h) => h,
-                None => return Ok(None),
+    let new_hash =
+        match find_latest_version(synapse_url, current_hash, domain, synapse_token, sink).await {
+            Ok(Some(node)) => {
+                let parsed = CmnUri::parse(&node.uri).map_err(|e| {
+                    crate::HyphaError::new("lineage_error", format!("Invalid lineage URI: {}", e))
+                })?;
+                match parsed.hash {
+                    Some(h) => h,
+                    None => return Ok(None),
+                }
             }
-        }
-        Ok(None) => return Ok(None),
-        Err(e) => return Err(e),
-    };
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(e),
+        };
 
     if new_hash == current_hash {
         return Ok(None);
     }
 
-    let cache = CacheDir::new();
+    let cache = CacheDir::new()?;
     let domain_cache = cache.domain(domain);
     let new_uri = format!("cmn://{}/{}", domain, new_hash);
 
     let entry = get_cmn_entry(sink, &domain_cache, cache.cmn_ttl_ms).await?;
     let capsule = primary_capsule(&entry)?;
-    let public_key = capsule.key.clone();
-
-    let new_manifest = fetch_spore_manifest(capsule, &new_hash)
-        .await
-        .map_err(|e| {
-            crate::HyphaError::new("manifest_failed", format!("Failed to fetch spore: {}", e))
-        })?;
-
-    verify_manifest_two_key_signatures(&new_manifest, &public_key, &public_key).map_err(|e| {
-        crate::HyphaError::new("sig_failed", format!("Spore signature invalid: {}", e))
-    })?;
+    let _ = fetch_verified_spore(sink, capsule, &new_hash, &domain_cache, cache.cmn_ttl_ms).await?;
 
     check_taste(sink, &cache, &new_uri, domain, &new_hash)?;
 
@@ -128,7 +119,13 @@ pub(super) async fn update_bonds(
 
     if !updated.is_empty() {
         for upd in &updated {
-            if let Some(bond) = core.bonds.iter_mut().find(|bond| bond.uri == upd.old_uri) {
+            // Match on (uri, relation) so duplicate URIs under different
+            // relations rewrite the exact bond that was checked.
+            if let Some(bond) = core
+                .bonds
+                .iter_mut()
+                .find(|bond| bond.uri == upd.old_uri && bond.relation == upd.relation)
+            {
                 bond.uri = upd.new_uri.clone();
             }
         }
@@ -144,16 +141,36 @@ pub(super) async fn update_bonds(
     }))
 }
 
+/// Maximum number of lineage hops to follow when resolving the latest version.
+/// Bounds runaway walks; reaching it is surfaced as a warning.
+const MAX_LINEAGE_DEPTH: usize = 256;
+
 pub(super) async fn find_latest_version(
     synapse_url: &str,
     current_hash: &str,
     source_domain: &str,
     token: Option<&str>,
+    sink: &dyn crate::EventSink,
 ) -> Result<Option<BondNode>, crate::HyphaError> {
     let mut candidate_hash = current_hash.to_string();
     let mut latest: Option<BondNode> = None;
+    // Track visited hashes so a cyclic lineage graph can't loop forever.
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(candidate_hash.clone());
 
-    for _depth in 0..20 {
+    let mut depth = 0;
+    loop {
+        if depth >= MAX_LINEAGE_DEPTH {
+            sink.emit(crate::HyphaEvent::Warn {
+                message: format!(
+                    "Lineage walk hit the {}-hop limit; reported version may not be the newest",
+                    MAX_LINEAGE_DEPTH
+                ),
+            });
+            break;
+        }
+        depth += 1;
+
         let bonds = fetch_bonds(synapse_url, &candidate_hash, "inbound", 1, token).await?;
 
         let same_domain: Vec<BondNode> = bonds
@@ -175,6 +192,14 @@ pub(super) async fn find_latest_version(
             Some(h) => h.clone(),
             None => break,
         };
+
+        // Cycle guard: stop if we've already seen this node.
+        if !visited.insert(next_hash.clone()) {
+            sink.emit(crate::HyphaEvent::Warn {
+                message: format!("Lineage cycle detected at {}; stopping walk", next_hash),
+            });
+            break;
+        }
 
         candidate_hash = next_hash;
         latest = Some(next);

@@ -88,7 +88,10 @@ pub async fn handle_replicate(
         uris
     };
 
-    let cache = CacheDir::new();
+    let cache = match CacheDir::new() {
+        Ok(cache) => cache,
+        Err(e) => return out.error_hypha(&e),
+    };
     let mut replicated = Vec::new();
 
     for uri_str in &uris_to_replicate {
@@ -127,13 +130,8 @@ pub async fn handle_replicate(
         let domain_cache = cache.domain(&uri.domain);
 
         // Resolve source: cmn.json → manifest → verify
-        let entry = match visitor::get_cmn_entry(
-            &crate::api::OutSink(out),
-            &domain_cache,
-            cache.cmn_ttl_ms,
-        )
-        .await
-        {
+        let sink = crate::api::OutSink(out);
+        let entry = match visitor::get_cmn_entry(&sink, &domain_cache, cache.cmn_ttl_ms).await {
             Ok(p) => p,
             Err(e) => return out.error_hypha(&e),
         };
@@ -142,35 +140,21 @@ pub async fn handle_replicate(
             Ok(c) => c,
             Err(e) => return out.error("cmn_invalid", &e.to_string()),
         };
-        let public_key = capsule.key.clone();
-        let ep = &capsule.endpoints;
 
-        let manifest = match visitor::fetch_spore_manifest(capsule, &hash).await {
-            Ok(m) => m,
-            Err(e) => {
-                return out.error(
-                    "manifest_failed",
-                    &format!("Failed to fetch spore {}: {}", hash, e),
-                )
-            }
-        };
-
-        let source_spore = match visitor::decode_spore_manifest(&manifest) {
-            Ok(spore) => spore,
+        let (_manifest, source_spore) = match visitor::fetch_verified_spore(
+            &sink,
+            capsule,
+            &hash,
+            &domain_cache,
+            cache.cmn_ttl_ms,
+        )
+        .await
+        {
+            Ok(result) => result,
             Err(e) => return out.error_hypha(&e),
         };
 
-        let author_key = visitor::embedded_spore_author_key(&manifest);
-        let ak = author_key.as_deref().unwrap_or(&public_key);
-
-        if let Err(e) = visitor::verify_manifest_two_key_signatures(&manifest, &public_key, ak) {
-            return out.error(
-                "sig_failed",
-                &format!("Signature verification failed for {}: {}", hash, e),
-            );
-        }
-
-        // Download source archive to target site
+        // Source must offer an archive distribution to re-publish.
         let source_dist_array = source_spore.distributions();
         if source_dist_array.is_empty() {
             return out.error(
@@ -178,70 +162,50 @@ pub async fn handle_replicate(
                 &format!("No distribution options for {}", hash),
             );
         }
+        if !source_dist_array.iter().any(|d| d.is_archive()) {
+            return out.error(
+                "replicate_err",
+                &format!(
+                    "Spore {} has no archive distribution; only archive-distributed spores can be replicated",
+                    hash
+                ),
+            );
+        }
 
-        // Download archive to target site's archive dir
+        // Download AND content-verify the archive into the local cache. This
+        // recomputes the content hash against `hash` (and marks the spore toxic
+        // on mismatch), so we never re-publish unverified bytes under our key.
+        if let Err(e) = visitor::fetch_spore_to_cache(&sink, &cache, uri_str).await {
+            return out.error_hypha(&e);
+        }
+
+        // The verified compressed archive now lives in the cache; copy it into
+        // the target site's archive dir via a temp file + atomic rename.
+        let cached_archive = cache.spore_path(&uri.domain, &hash).join("archive.tar.zst");
+        if !cached_archive.exists() {
+            return out.error(
+                "replicate_err",
+                &format!("No verified archive available for {} after fetch", hash),
+            );
+        }
+
         let archive_dir = site.archive_dir();
         if let Err(e) = std::fs::create_dir_all(&archive_dir) {
             return out.error("dir_error", &format!("Failed to create archive dir: {}", e));
         }
-
-        let mut new_dist: Vec<substrate::SporeDist> = vec![];
-        let mut downloaded = false;
-
-        for dist_entry in source_dist_array {
-            if dist_entry.is_archive() {
-                let archive_filename = format!("{}.tar.zst", hash);
-                let target_archive_path = archive_dir.join(&archive_filename);
-                let mut archive_downloaded = false;
-                for archive_ep in ep.iter().filter(|endpoint| endpoint.kind == "archive") {
-                    let archive_url = match archive_ep.resolve_url(&hash) {
-                        Ok(url) => url,
-                        Err(e) => {
-                            out.warn(
-                                "URL_ERROR",
-                                &format!(
-                                    "Invalid archive URL for format {:?}: {}",
-                                    archive_ep.format, e
-                                ),
-                            );
-                            continue;
-                        }
-                    };
-
-                    match download_file_to_path(&archive_url, &target_archive_path).await {
-                        Ok(_) => {
-                            new_dist.push(substrate::SporeDist {
-                                kind: substrate::DistKind::Archive,
-                                filename: None,
-                                url: None,
-                                git_ref: None,
-                                cid: None,
-                                extra: Default::default(),
-                            });
-                            archive_downloaded = true;
-                            downloaded = true;
-                            break;
-                        }
-                        Err(e) => {
-                            out.warn(
-                                "DOWNLOAD_FAILED",
-                                &format!("Failed to download archive {}: {}", archive_url, e),
-                            );
-                        }
-                    }
-                }
-                if archive_downloaded {
-                    break;
-                }
-            }
+        let target_archive_path = archive_dir.join(format!("{}.tar.zst", hash));
+        if let Err(e) = copy_file_atomic(&cached_archive, &target_archive_path) {
+            return out.error_hypha(&e);
         }
 
-        if !downloaded {
-            return out.error(
-                "fetch_failed",
-                &format!("Failed to download archive for {}", hash),
-            );
-        }
+        let new_dist: Vec<substrate::SporeDist> = vec![substrate::SporeDist {
+            kind: substrate::DistKind::Archive,
+            filename: None,
+            url: None,
+            git_ref: None,
+            cid: None,
+            extra: Default::default(),
+        }];
 
         // Build new capsule: same core + core_signature, new dist, re-signed
         let new_capsule = SporeCapsule {
@@ -324,73 +288,26 @@ pub async fn handle_replicate(
     out.ok(json!({ "replicated": replicated }))
 }
 
-/// Download a file to a specific path
-async fn download_file_to_path(
-    url: &str,
+/// Copy a file via a temp file + atomic rename so an interrupted copy never
+/// leaves a truncated archive published in the site's public dir.
+fn copy_file_atomic(
+    src: &std::path::Path,
     dest: &std::path::Path,
 ) -> Result<(), crate::sink::HyphaError> {
     use crate::sink::HyphaError;
-    let max_download_bytes = crate::cache::CacheDir::new().max_download_bytes;
 
-    let client = substrate::client::http_client(300).map_err(|e| {
+    let parent = dest.parent().ok_or_else(|| {
+        HyphaError::new("write_error", "Cannot determine archive parent directory")
+    })?;
+    let tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
         HyphaError::new(
-            "fetch_failed",
-            format!("Failed to create HTTP client: {}", e),
+            "write_error",
+            format!("Failed to create temp archive: {}", e),
         )
     })?;
-
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| HyphaError::new("fetch_failed", format!("Failed to download: {}", e)))?;
-
-    if !response.status().is_success() {
-        return Err(HyphaError::new(
-            "fetch_failed",
-            format!("HTTP {}", response.status()),
-        ));
-    }
-
-    if let Some(cl) = response.content_length() {
-        if cl > max_download_bytes {
-            return Err(HyphaError::new(
-                "fetch_failed",
-                format!(
-                    "Response too large: {} bytes exceeds max_download_bytes ({})",
-                    cl, max_download_bytes
-                ),
-            ));
-        }
-    }
-
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| HyphaError::new("fetch_failed", format!("Failed to read response: {}", e)))?;
-    if bytes.len() as u64 > max_download_bytes {
-        return Err(HyphaError::new(
-            "fetch_failed",
-            format!(
-                "Download exceeds max_download_bytes ({})",
-                max_download_bytes
-            ),
-        ));
-    }
-
-    let dest = dest.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        use std::io::Write;
-        let mut out = std::fs::File::create(&dest)
-            .map_err(|e| HyphaError::new("write_error", format!("Failed to create file: {}", e)))?;
-        out.write_all(&bytes)
-            .map_err(|e| HyphaError::new("write_error", format!("Failed to write file: {}", e)))?;
-        out.sync_all()
-            .map_err(|e| HyphaError::new("write_error", format!("Failed to sync file: {}", e)))?;
-        Ok::<(), HyphaError>(())
-    })
-    .await
-    .map_err(|e| HyphaError::new("write_error", format!("Write task failed: {}", e)))??;
-
+    std::fs::copy(src, tmp.path())
+        .map_err(|e| HyphaError::new("write_error", format!("Failed to copy archive: {}", e)))?;
+    tmp.persist(dest)
+        .map_err(|e| HyphaError::new("write_error", format!("Failed to publish archive: {}", e)))?;
     Ok(())
 }

@@ -1,5 +1,23 @@
 use super::*;
 
+/// Remove and recreate a directory so extraction/cloning starts from empty.
+fn reset_dir(dir: &std::path::Path) -> Result<(), crate::HyphaError> {
+    if dir.exists() {
+        std::fs::remove_dir_all(dir).map_err(|e| {
+            crate::HyphaError::new(
+                "absorb_error",
+                format!("Failed to reset content dir: {}", e),
+            )
+        })?;
+    }
+    std::fs::create_dir_all(dir).map_err(|e| {
+        crate::HyphaError::new(
+            "absorb_error",
+            format!("Failed to recreate content dir: {}", e),
+        )
+    })
+}
+
 /// Absorb source info for tracking
 #[derive(Serialize)]
 struct AbsorbSource {
@@ -145,7 +163,7 @@ pub async fn absorb(
         )
     })?;
 
-    let cache = CacheDir::new();
+    let cache = CacheDir::new()?;
     let mut sources: Vec<AbsorbSource> = Vec::new();
 
     for (uri, hash) in &parsed_uris {
@@ -154,34 +172,16 @@ pub async fn absorb(
         check_taste(sink, &cache, &uri_str_current, &uri.domain, hash)?;
 
         sink.emit(crate::HyphaEvent::Warn {
-            message: format!("Fetching {}...", uris_to_absorb[sources.len()]),
+            message: format!("Fetching {}...", uri_str_current),
         });
 
         let domain_cache = cache.domain(&uri.domain);
 
         let entry = get_cmn_entry(sink, &domain_cache, cache.cmn_ttl_ms).await?;
-
         let capsule = primary_capsule(&entry)?;
-        let public_key = capsule.key.clone();
         let ep = &capsule.endpoints;
-
-        let manifest = fetch_spore_manifest(capsule, hash).await.map_err(|e| {
-            crate::HyphaError::new(
-                "manifest_failed",
-                format!("Failed to fetch spore {}: {}", hash, e),
-            )
-        })?;
-        let spore = decode_spore_manifest(&manifest)?;
-
-        let author_key = embedded_spore_author_key(&manifest);
-        let ak = author_key.as_deref().unwrap_or(&public_key);
-
-        verify_manifest_two_key_signatures(&manifest, &public_key, ak).map_err(|e| {
-            crate::HyphaError::new(
-                "sig_failed",
-                format!("Signature verification failed for {}: {}", hash, e),
-            )
-        })?;
+        let (manifest, spore) =
+            fetch_verified_spore(sink, capsule, hash, &domain_cache, cache.cmn_ttl_ms).await?;
 
         sink.emit(crate::HyphaEvent::Warn {
             message: "Signature verified".to_string(),
@@ -198,11 +198,13 @@ pub async fn absorb(
         })?;
 
         let manifest_path = source_dir.join("spore.json");
-        std::fs::write(
-            &manifest_path,
-            serde_json::to_string_pretty(&spore).unwrap_or_default(),
-        )
-        .map_err(|e| {
+        let manifest_pretty = serde_json::to_string_pretty(&spore).map_err(|e| {
+            crate::HyphaError::new(
+                "absorb_error",
+                format!("Failed to format spore.json: {}", e),
+            )
+        })?;
+        std::fs::write(&manifest_path, manifest_pretty).map_err(|e| {
             crate::HyphaError::new("absorb_error", format!("Failed to write spore.json: {}", e))
         })?;
 
@@ -232,20 +234,7 @@ pub async fn absorb(
                 for archive_ep in &archive_endpoints {
                     let archive_url = build_archive_url_from_endpoint(archive_ep, hash)?;
 
-                    if content_dir.exists() {
-                        std::fs::remove_dir_all(&content_dir).map_err(|e| {
-                            crate::HyphaError::new(
-                                "absorb_error",
-                                format!("Failed to reset content dir: {}", e),
-                            )
-                        })?;
-                    }
-                    std::fs::create_dir_all(&content_dir).map_err(|e| {
-                        crate::HyphaError::new(
-                            "absorb_error",
-                            format!("Failed to recreate content dir: {}", e),
-                        )
-                    })?;
+                    reset_dir(&content_dir)?;
 
                     match download_and_extract_to_dir(
                         &archive_url,
@@ -258,10 +247,19 @@ pub async fn absorb(
                             downloaded = true;
                             break;
                         }
+                        Err(e) if e.is_policy_rejected() => {
+                            return Err(crate::HyphaError::new(
+                                "spore_security_rejected",
+                                e.to_string(),
+                            ));
+                        }
                         Err(e) if e.is_malicious() => {
-                            let msg = e.to_string();
-                            mark_toxic(&domain_cache, hash, &msg);
-                            return Err(crate::HyphaError::new("TOXIC", msg));
+                            sink.emit(crate::HyphaEvent::Warn {
+                                message: format!(
+                                    "Unverified content from {} was rejected: {}",
+                                    archive_url, e
+                                ),
+                            });
                         }
                         Err(e) => {
                             sink.emit(crate::HyphaEvent::Warn {
@@ -275,22 +273,9 @@ pub async fn absorb(
                 }
             } else if let Some(git_url) = dist_git_url(dist_entry) {
                 let git_ref = dist_git_ref(dist_entry);
-                if content_dir.exists() {
-                    std::fs::remove_dir_all(&content_dir).map_err(|e| {
-                        crate::HyphaError::new(
-                            "absorb_error",
-                            format!("Failed to reset content dir: {}", e),
-                        )
-                    })?;
-                }
-                std::fs::create_dir_all(&content_dir).map_err(|e| {
-                    crate::HyphaError::new(
-                        "absorb_error",
-                        format!("Failed to recreate content dir: {}", e),
-                    )
-                })?;
+                reset_dir(&content_dir)?;
 
-                match clone_git_to_dir(git_url, git_ref, &content_dir).await {
+                match clone_git_to_dir(git_url, git_ref, &content_dir, &cache).await {
                     Ok(_) => {
                         downloaded = true;
                         break;
@@ -310,6 +295,15 @@ pub async fn absorb(
                 format!("Failed to download content for {}", hash),
             ));
         }
+
+        verify_downloaded_content(
+            sink,
+            &source_dir,
+            &content_dir,
+            &manifest,
+            hash,
+            &domain_cache,
+        )?;
 
         sources.push(AbsorbSource {
             uri: format!("cmn://{}/{}", uri.domain, hash),
@@ -403,9 +397,17 @@ fn generate_absorb_prompt(
         file,
         "- Unexpected network calls, file system access, or command execution"
     )?;
+    writeln!(
+        file,
+        "- Auto-execution/config surfaces: build scripts, package manager configs, editor configs, shell hooks, CI files, and language-specific runners"
+    )?;
     writeln!(file, "- Hidden backdoors or data exfiltration")?;
     writeln!(file, "- Dependency injection or supply chain risks")?;
     writeln!(file, "- Code that doesn't match the stated `intent`")?;
+    writeln!(
+        file,
+        "- `.git` and `.cmn` are protected receive-time control paths, not a complete sandbox"
+    )?;
     writeln!(file)?;
     writeln!(
         file,
@@ -549,6 +551,10 @@ fn generate_absorb_prompt(
         writeln!(file, "| No obfuscated code? | ✅/⚠️/❌ | |")?;
         writeln!(file, "| No suspicious network calls? | ✅/⚠️/❌ | |")?;
         writeln!(file, "| No unexpected file/system access? | ✅/⚠️/❌ | |")?;
+        writeln!(
+            file,
+            "| Auto-execution/config surfaces inspected? | ✅/⚠️/❌ | build scripts, package manager configs, editor configs, shell hooks, CI files, language runners |"
+        )?;
         writeln!(file, "| Dependencies look safe? | ✅/⚠️/❌ | |")?;
         writeln!(file)?;
         writeln!(file, "## Recommendation")?;

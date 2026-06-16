@@ -3,6 +3,12 @@ use substrate::{
     decide_key_trust, needs_key_trust_refresh, DomainKeyConfirmation, KeyTrustDecision,
     KeyTrustFailure, KeyTrustRefreshPolicy, KeyTrustWarning, KeyTrustWitnessPolicy,
 };
+use subtle::ConstantTimeEq;
+
+#[derive(Debug, Clone, Copy)]
+struct ConfirmedKeyTrust {
+    retired_at_epoch_ms: Option<u64>,
+}
 
 /// Get cmn.json for a domain (from cache or fresh fetch)
 pub async fn get_cmn_entry(
@@ -14,7 +20,29 @@ pub async fn get_cmn_entry(
     let status = domain_cache.load_status();
     if status.cmn.is_fresh(cmn_ttl_ms) {
         if let Some(capsule) = domain_cache.load_cmn() {
-            return Ok(capsule);
+            match verify_cmn_entry_signature(&capsule) {
+                Ok(()) => match domain_cache.validate_and_pin_cmn_state(&capsule) {
+                    Ok(()) => return Ok(capsule),
+                    Err(e) => {
+                        sink.emit(crate::HyphaEvent::Warn {
+                            message: format!(
+                                "Cached cmn.json for {} failed domain-state verification; refetching: {}",
+                                domain_cache.domain, e.message
+                            ),
+                        });
+                        domain_cache.update_cmn_status(false, Some(&e.message));
+                    }
+                },
+                Err(e) => {
+                    sink.emit(crate::HyphaEvent::Warn {
+                        message: format!(
+                            "Cached cmn.json for {} failed signature verification; refetching: {}",
+                            domain_cache.domain, e.message
+                        ),
+                    });
+                    domain_cache.update_cmn_status(false, Some(&e.message));
+                }
+            }
         }
     }
 
@@ -25,6 +53,11 @@ pub async fn get_cmn_entry(
             domain_cache.update_cmn_status(false, Some(&e.message));
         })?;
 
+    if let Err(e) = domain_cache.validate_and_pin_cmn_state(&capsule) {
+        domain_cache.update_cmn_status(false, Some(&e.message));
+        return Err(e);
+    }
+
     // Save to cache
     if let Err(e) = domain_cache.save_cmn(&capsule) {
         sink.emit(crate::HyphaEvent::Warn {
@@ -34,6 +67,18 @@ pub async fn get_cmn_entry(
     domain_cache.update_cmn_status(true, None);
 
     Ok(capsule)
+}
+
+pub(super) fn verify_cmn_entry_signature(entry: &CmnEntry) -> Result<(), crate::HyphaError> {
+    let key = entry.primary_key().map_err(|e| {
+        crate::HyphaError::new("cmn_signature_failed", format!("Invalid cmn.json: {}", e))
+    })?;
+    entry.verify_signature(key).map_err(|e| {
+        crate::HyphaError::new(
+            "cmn_signature_failed",
+            format!("cmn.json signature verification failed: {}", e),
+        )
+    })
 }
 
 /// Fetch and parse a spore manifest using endpoint template
@@ -47,7 +92,7 @@ pub async fn fetch_spore_manifest(
             format!("Failed to create HTTP client: {}", e),
         )
     })?;
-    substrate::client::fetch_spore_manifest(&client, capsule, hash, Default::default())
+    substrate::client::fetch_spore_manifest(&client, capsule, hash, fetch_opts(None))
         .await
         .map_err(|e| crate::HyphaError::new("manifest_failed", e.to_string()))
 }
@@ -102,14 +147,6 @@ pub fn verify_manifest_two_key_signatures(
         .map_err(|e| crate::HyphaError::new("sig_failed", e.to_string()))
 }
 
-/// Verify both signatures using a single key (self-hosted convenience wrapper).
-pub fn verify_manifest_both_signatures(
-    manifest: &serde_json::Value,
-    public_key: &str,
-) -> Result<(), crate::HyphaError> {
-    verify_manifest_two_key_signatures(manifest, public_key, public_key)
-}
-
 /// Read the embedded author key from a spore manifest.
 pub fn embedded_spore_author_key(payload: &serde_json::Value) -> Option<String> {
     substrate::decode_spore(payload)
@@ -132,16 +169,13 @@ fn witness_policy(mode: crate::config::SynapseWitnessMode) -> KeyTrustWitnessPol
     }
 }
 
-/// Verify a spore manifest with key trust model.
+/// Verify a spore manifest with the two-key trust model.
 ///
-/// If `core.key` is present:
+/// `core.key` is mandatory:
 ///   1. Verify `core_signature` against `core.key`
 ///   2. Check if key is trusted (cache hit with valid TTL)
 ///   3. If not cached: try domain confirmation, then Synapse fallback
 ///   4. Verify `capsule_signature` against host_key
-///
-/// If `core.key` is absent (legacy spore):
-///   Falls back to the traditional cmn.json-first verification path.
 ///
 /// Returns the author key used for verification.
 #[allow(clippy::too_many_arguments)]
@@ -159,20 +193,47 @@ pub async fn verify_spore_with_key_trust(
     synapse_url: Option<&str>,
     synapse_token: Option<&str>,
 ) -> Result<String, crate::HyphaError> {
-    // Try to extract core.key (new model)
-    let core_key = embedded_spore_author_key(manifest);
+    // core.key is mandatory in the two-key model.
+    let spore = substrate::decode_spore(manifest).map_err(|e| {
+        crate::HyphaError::new("sig_failed", format!("Invalid spore manifest: {}", e))
+    })?;
+    let signed_at_epoch_ms = spore.timestamp_ms();
+    let key = spore
+        .embedded_core_key()
+        .map(str::to_string)
+        .ok_or_else(|| {
+            crate::HyphaError::with_hint(
+                "missing_core_key",
+                "Spore manifest has no core.key — cannot verify author signature",
+                "re-release the spore with a current version of hypha, which embeds core.key",
+            )
+        })?;
+    let author_domain = spore.author_domain().to_string();
+    let author_domain_cache;
+    let key_domain_cache = if author_domain == domain_cache.domain {
+        domain_cache
+    } else {
+        let cache = crate::cache::CacheDir::new()?;
+        author_domain_cache = cache.domain(&author_domain);
+        &author_domain_cache
+    };
 
-    let author_key = if let Some(ref key) = core_key {
+    let author_key = {
+        let key = &key;
         // Verify core_signature against embedded key
-        verify_manifest_core_signature(manifest, key).map_err(|e| {
+        spore.verify_core_signature(key).map_err(|e| {
             crate::HyphaError::new(
                 "sig_failed",
-                format!("Core signature verification failed: {}", e),
+                format!("Core signature verification failed: {e}"),
             )
         })?;
 
-        let key_trusted_in_cache =
-            domain_cache.is_key_trusted(key, key_trust_ttl_ms, clock_skew_tolerance_ms);
+        let key_trusted_in_cache = key_domain_cache.is_key_trusted_for_time(
+            key,
+            signed_at_epoch_ms,
+            key_trust_ttl_ms,
+            clock_skew_tolerance_ms,
+        );
 
         let should_refresh_key_trust = match needs_key_trust_refresh(
             key_trusted_in_cache,
@@ -184,7 +245,7 @@ pub async fn verify_spore_with_key_trust(
                     "key_untrusted",
                     format!(
                         "Offline key trust mode requires a valid cached key binding for domain {}",
-                        domain_cache.domain
+                        key_domain_cache.domain
                     ),
                     "Temporarily set cache.key_trust_refresh_mode=expired and verify once online to refresh key trust cache"
                         .to_string(),
@@ -199,16 +260,21 @@ pub async fn verify_spore_with_key_trust(
         };
 
         if should_refresh_key_trust {
+            let mut confirmed_key_trust = None;
             let domain_confirmation = match try_confirm_key_from_domain(
                 sink,
-                &domain_cache.domain,
+                key_domain_cache,
                 key,
+                signed_at_epoch_ms,
                 cmn_ttl_ms,
             )
             .await
             {
-                Ok(true) => DomainKeyConfirmation::Confirmed,
-                Ok(false) => DomainKeyConfirmation::Rejected,
+                Ok(Some(confirmation)) => {
+                    confirmed_key_trust = Some(confirmation);
+                    DomainKeyConfirmation::Confirmed
+                }
+                Ok(None) => DomainKeyConfirmation::Rejected,
                 Err(_) => DomainKeyConfirmation::Unreachable,
             };
 
@@ -218,9 +284,14 @@ pub async fn verify_spore_with_key_trust(
                 {
                     if let Some(url) = synapse_url {
                         Some(
-                            ask_synapse_key_trust(url, key, &domain_cache.domain, synapse_token)
-                                .await
-                                .unwrap_or(false),
+                            ask_synapse_key_trust(
+                                url,
+                                key,
+                                &key_domain_cache.domain,
+                                synapse_token,
+                            )
+                            .await
+                            .unwrap_or(false),
                         )
                     } else {
                         None
@@ -239,14 +310,17 @@ pub async fn verify_spore_with_key_trust(
                     cache_key, warning, ..
                 } => {
                     if cache_key {
-                        let _ = domain_cache.save_key_trust(key);
+                        let retired_at_epoch_ms = confirmed_key_trust
+                            .and_then(|confirmation| confirmation.retired_at_epoch_ms);
+                        let _ = key_domain_cache
+                            .save_key_trust_with_retirement(key, retired_at_epoch_ms);
                     }
                     match warning {
                         Some(KeyTrustWarning::SynapseSource) => {
                             sink.emit(crate::HyphaEvent::Warn {
                                 message: format!(
                                     "Domain {} unreachable, trusting Synapse source (second-class)",
-                                    domain_cache.domain
+                                    key_domain_cache.domain
                                 ),
                             });
                         }
@@ -254,7 +328,7 @@ pub async fn verify_spore_with_key_trust(
                             sink.emit(crate::HyphaEvent::Warn {
                                 message: format!(
                                     "Key trusted via Synapse witness (second-class) for {}",
-                                    domain_cache.domain
+                                    key_domain_cache.domain
                                 ),
                             });
                         }
@@ -267,7 +341,7 @@ pub async fn verify_spore_with_key_trust(
                             "key_untrusted",
                             format!(
                                 "Key {} not confirmed by domain {}",
-                                key, domain_cache.domain
+                                key, key_domain_cache.domain
                             ),
                         ),
                         KeyTrustFailure::DomainUnreachableWitnessDisabled => {
@@ -275,7 +349,7 @@ pub async fn verify_spore_with_key_trust(
                                 "key_untrusted",
                                 format!(
                                     "Cannot verify key trust for domain {}: domain offline and Synapse witness fallback is disabled",
-                                    domain_cache.domain
+                                    key_domain_cache.domain
                                 ),
                                 "Set cache.key_trust_synapse_witness_mode=allow or refresh key trust cache while the domain is online"
                                     .to_string(),
@@ -286,7 +360,7 @@ pub async fn verify_spore_with_key_trust(
                                 "key_untrusted",
                                 format!(
                                     "Cannot verify key trust for domain {}: domain offline and Synapse could not confirm",
-                                    domain_cache.domain
+                                    key_domain_cache.domain
                                 ),
                             )
                         }
@@ -295,7 +369,7 @@ pub async fn verify_spore_with_key_trust(
                                 "key_untrusted",
                                 format!(
                                     "Cannot verify key trust for domain {}: domain offline and no Synapse configured",
-                                    domain_cache.domain
+                                    key_domain_cache.domain
                                 ),
                             )
                         }
@@ -304,7 +378,7 @@ pub async fn verify_spore_with_key_trust(
                                 "key_untrusted",
                                 format!(
                                     "Offline key trust mode requires a valid cached key binding for domain {}",
-                                    domain_cache.domain
+                                    key_domain_cache.domain
                                 ),
                                 "Temporarily set cache.key_trust_refresh_mode=expired and verify once online to refresh key trust cache"
                                     .to_string(),
@@ -317,18 +391,17 @@ pub async fn verify_spore_with_key_trust(
         }
 
         key.clone()
-    } else {
-        // Legacy path: no core.key, use host_key as author_key
-        host_key.to_string()
     };
 
     // Verify both signatures (core + capsule)
-    verify_manifest_two_key_signatures(manifest, host_key, &author_key).map_err(|e| {
-        crate::HyphaError::new(
-            "sig_failed",
-            format!("Signature verification failed: {}", e),
-        )
-    })?;
+    spore
+        .verify_signatures(host_key, &author_key)
+        .map_err(|e| {
+            crate::HyphaError::new(
+                "sig_failed",
+                format!("Signature verification failed: {}", e),
+            )
+        })?;
 
     Ok(author_key)
 }
@@ -336,31 +409,38 @@ pub async fn verify_spore_with_key_trust(
 /// Try to confirm a key belongs to a domain by fetching cmn.json.
 ///
 /// Returns:
-///   - `Ok(true)` if the domain's cmn.json confirms the key (current or previous)
-///   - `Ok(false)` if the domain is reachable but the key is not found
+///   - `Ok(Some(_))` if cmn.json confirms the key for the signed timestamp
+///   - `Ok(None)` if the domain is reachable but the key is absent/revoked/expired
 ///   - `Err(...)` if the domain is unreachable
 async fn try_confirm_key_from_domain(
     sink: &dyn crate::EventSink,
-    domain: &str,
+    domain_cache: &DomainCache,
     key: &str,
+    signed_at_epoch_ms: u64,
     _cmn_ttl_ms: u64,
-) -> Result<bool, crate::HyphaError> {
+) -> Result<Option<ConfirmedKeyTrust>, crate::HyphaError> {
     // Fetch cmn.json directly (bypass cache to get fresh data for trust)
-    let entry = match fetch_cmn_json(domain).await {
+    let entry = match fetch_cmn_json(&domain_cache.domain).await {
         Ok(e) => e,
         Err(e) => {
             sink.emit(crate::HyphaEvent::Warn {
                 message: format!(
                     "Cannot reach {} for key confirmation: {}",
-                    domain, e.message
+                    domain_cache.domain, e.message
                 ),
             });
             return Err(e);
         }
     };
+    domain_cache.validate_and_pin_cmn_state(&entry)?;
 
     entry
-        .primary_confirms_key(key)
+        .primary_key_confirmation_at(key, signed_at_epoch_ms)
+        .map(|confirmation| {
+            confirmation.map(|confirmation| ConfirmedKeyTrust {
+                retired_at_epoch_ms: confirmation.retired_at_epoch_ms(),
+            })
+        })
         .map_err(|e| crate::HyphaError::new("key_untrusted", e.to_string()))
 }
 
@@ -393,7 +473,7 @@ async fn ask_synapse_key_trust(
     let capsule = entry
         .primary_capsule()
         .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
-    Ok(capsule.key == key)
+    Ok(bool::from(capsule.key.as_bytes().ct_eq(key.as_bytes())))
 }
 
 /// Verify content hash and size_bytes match the expected values from the manifest.
@@ -406,8 +486,14 @@ pub fn verify_content_hash(
     expected_hash: &str,
     manifest: &serde_json::Value,
 ) -> Result<(), crate::HyphaError> {
+    // Decode/walk failures are environmental (transient): they are reported
+    // with `hash_compute_failed` so callers don't blacklist the spore as toxic.
+    // Only a genuine content/size mismatch yields `hash_mismatch`.
     let spore = substrate::decode_spore(manifest).map_err(|e| {
-        crate::HyphaError::new("hash_mismatch", format!("Invalid spore manifest: {}", e))
+        crate::HyphaError::new(
+            "hash_compute_failed",
+            format!("Invalid spore manifest: {}", e),
+        )
     })?;
     let entries = crate::tree::walk_dir(
         content_path,
@@ -415,9 +501,293 @@ pub fn verify_content_hash(
         &spore.tree().follow_rules,
     )
     .map_err(|e| {
-        crate::HyphaError::new("hash_mismatch", format!("Failed to walk directory: {}", e))
+        crate::HyphaError::new(
+            "hash_compute_failed",
+            format!("Failed to walk directory: {}", e),
+        )
     })?;
     spore
         .verify_content_hash_and_size(&entries, expected_hash)
         .map_err(|e| crate::HyphaError::new("hash_mismatch", e.to_string()))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn keypair(seed: u8) -> ([u8; 32], String) {
+        let private_key = [seed; 32];
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let public_key = substrate::format_key(
+            substrate::KeyAlgorithm::Ed25519,
+            &signing_key.verifying_key().to_bytes(),
+        );
+        (private_key, public_key)
+    }
+
+    fn signed_cmn_entry() -> substrate::CmnEntry {
+        let (private_key, public_key) = keypair(7);
+        let capsules = vec![substrate::CmnCapsuleEntry {
+            uri: "cmn://example.com".to_string(),
+            serial: 1,
+            key: public_key,
+            history: vec![],
+            endpoints: vec![substrate::CmnEndpoint {
+                kind: "spore".to_string(),
+                url: "https://example.com/cmn/spore/{hash}.json".to_string(),
+                hash: String::new(),
+                hashes: vec![],
+                format: None,
+                delta_url: None,
+            }],
+        }];
+        let capsule_signature = substrate::compute_signature(
+            &capsules,
+            substrate::SignatureAlgorithm::Ed25519,
+            &private_key,
+        )
+        .unwrap();
+        substrate::CmnEntry {
+            schema: substrate::CMN_SCHEMA.to_string(),
+            capsules,
+            capsule_signature,
+        }
+    }
+
+    fn signed_spore_manifest(
+        author_seed: u8,
+        host_seed: u8,
+    ) -> (serde_json::Value, String, String) {
+        signed_spore_manifest_for_domains("example.com", "example.com", author_seed, host_seed)
+    }
+
+    fn signed_spore_manifest_for_domains(
+        author_domain: &str,
+        host_domain: &str,
+        author_seed: u8,
+        host_seed: u8,
+    ) -> (serde_json::Value, String, String) {
+        let (author_private, author_key) = keypair(author_seed);
+        let (host_private, host_key) = keypair(host_seed);
+
+        let mut spore = substrate::Spore::new(
+            author_domain,
+            "signed-spore",
+            "Signature test",
+            vec!["Verify tampering rejection".to_string()],
+            "MIT",
+        );
+        spore.capsule.uri = format!("cmn://{host_domain}/b3.fake");
+        spore.capsule.core.key = author_key.clone();
+        spore.capsule.core.updated_at_epoch_ms = 1_700_000_000_000;
+
+        spore.capsule.core_signature = substrate::compute_signature(
+            &spore.capsule.core,
+            substrate::SignatureAlgorithm::Ed25519,
+            &author_private,
+        )
+        .unwrap();
+        spore.capsule_signature = substrate::compute_signature(
+            &spore.capsule,
+            substrate::SignatureAlgorithm::Ed25519,
+            &host_private,
+        )
+        .unwrap();
+
+        (serde_json::to_value(spore).unwrap(), author_key, host_key)
+    }
+
+    fn tamper_signature(signature: &str) -> String {
+        let mut chars: Vec<char> = signature.chars().collect();
+        let last = chars.last_mut().unwrap();
+        *last = if *last == '1' { '2' } else { '1' };
+        chars.into_iter().collect()
+    }
+
+    #[test]
+    fn verify_cmn_entry_signature_accepts_valid_entry() {
+        let entry = signed_cmn_entry();
+        verify_cmn_entry_signature(&entry).unwrap();
+    }
+
+    #[test]
+    fn verify_cmn_entry_signature_rejects_tampered_cache_entry() {
+        let mut entry = signed_cmn_entry();
+        entry.capsules[0].endpoints[0].url =
+            "https://evil.example/cmn/spore/{hash}.json".to_string();
+        let err = verify_cmn_entry_signature(&entry).unwrap_err();
+        assert_eq!(err.code, "cmn_signature_failed");
+    }
+
+    #[test]
+    fn verify_manifest_core_signature_rejects_tampered_signature() {
+        let (mut manifest, author_key, _) = signed_spore_manifest(11, 12);
+        let original = manifest["capsule"]["core_signature"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        manifest["capsule"]["core_signature"] =
+            serde_json::Value::String(tamper_signature(&original));
+
+        let err = verify_manifest_core_signature(&manifest, &author_key).unwrap_err();
+        assert_eq!(err.code, "sig_failed");
+    }
+
+    #[test]
+    fn verify_manifest_core_signature_rejects_tampered_core_content() {
+        let (mut manifest, author_key, _) = signed_spore_manifest(11, 12);
+        manifest["capsule"]["core"]["synopsis"] = serde_json::Value::String("Tampered".into());
+
+        let err = verify_manifest_core_signature(&manifest, &author_key).unwrap_err();
+        assert_eq!(err.code, "sig_failed");
+    }
+
+    #[test]
+    fn verify_manifest_two_key_signatures_rejects_wrong_domain_key() {
+        let (manifest, author_key, _) = signed_spore_manifest(11, 12);
+        let (_, wrong_host_key) = keypair(13);
+
+        let err = verify_manifest_two_key_signatures(&manifest, &wrong_host_key, &author_key)
+            .unwrap_err();
+        assert_eq!(err.code, "sig_failed");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn verify_spore_with_key_trust_rejects_unconfirmed_embedded_key() {
+        let _lock = crate::config::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+
+        let cache = crate::cache::CacheDir::new().unwrap();
+        let domain_cache = cache.domain("example.com");
+        let (manifest, _author_key, host_key) = signed_spore_manifest(11, 12);
+        domain_cache.save_key_trust(&host_key).unwrap();
+
+        let err = verify_spore_with_key_trust(
+            &crate::NoopSink,
+            &manifest,
+            &host_key,
+            &domain_cache,
+            0,
+            60_000,
+            0,
+            crate::config::KeyTrustRefreshMode::Offline,
+            crate::config::SynapseWitnessMode::RequireDomain,
+            false,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "key_untrusted");
+
+        std::env::remove_var("CMN_HOME");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn verify_spore_with_key_trust_accepts_cached_retired_key_before_cutoff() {
+        let _lock = crate::config::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+
+        let cache = crate::cache::CacheDir::new().unwrap();
+        let domain_cache = cache.domain("example.com");
+        let (manifest, author_key, host_key) = signed_spore_manifest(11, 12);
+        domain_cache
+            .save_key_trust_with_retirement(&author_key, Some(1_700_000_000_000))
+            .unwrap();
+
+        let verified_author_key = verify_spore_with_key_trust(
+            &crate::NoopSink,
+            &manifest,
+            &host_key,
+            &domain_cache,
+            0,
+            60_000,
+            0,
+            crate::config::KeyTrustRefreshMode::Offline,
+            crate::config::SynapseWitnessMode::RequireDomain,
+            false,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(verified_author_key, author_key);
+
+        std::env::remove_var("CMN_HOME");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn verify_spore_with_key_trust_checks_author_domain_for_replicates() {
+        let _lock = crate::config::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+
+        let cache = crate::cache::CacheDir::new().unwrap();
+        let host_domain_cache = cache.domain("mirror.example");
+        let author_domain_cache = cache.domain("author.example");
+        let (manifest, author_key, host_key) =
+            signed_spore_manifest_for_domains("author.example", "mirror.example", 21, 22);
+        author_domain_cache.save_key_trust(&author_key).unwrap();
+
+        let verified_author_key = verify_spore_with_key_trust(
+            &crate::NoopSink,
+            &manifest,
+            &host_key,
+            &host_domain_cache,
+            0,
+            60_000,
+            0,
+            crate::config::KeyTrustRefreshMode::Offline,
+            crate::config::SynapseWitnessMode::RequireDomain,
+            false,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(verified_author_key, author_key);
+
+        std::env::remove_var("CMN_HOME");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn verify_spore_with_key_trust_rejects_cached_retired_key_after_cutoff() {
+        let _lock = crate::config::ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+
+        let cache = crate::cache::CacheDir::new().unwrap();
+        let domain_cache = cache.domain("example.com");
+        let (manifest, author_key, host_key) = signed_spore_manifest(11, 12);
+        domain_cache
+            .save_key_trust_with_retirement(&author_key, Some(1_699_999_999_999))
+            .unwrap();
+
+        let err = verify_spore_with_key_trust(
+            &crate::NoopSink,
+            &manifest,
+            &host_key,
+            &domain_cache,
+            0,
+            60_000,
+            0,
+            crate::config::KeyTrustRefreshMode::Offline,
+            crate::config::SynapseWitnessMode::RequireDomain,
+            false,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "key_untrusted");
+
+        std::env::remove_var("CMN_HOME");
+    }
 }

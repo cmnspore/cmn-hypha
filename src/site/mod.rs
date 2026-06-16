@@ -143,7 +143,6 @@ impl SiteDir {
                 hashes: vec![],
                 format: None,
                 delta_url: None,
-                protocol_version: None,
             },
             substrate::model::CmnEndpoint {
                 kind: "spore".to_string(),
@@ -152,7 +151,6 @@ impl SiteDir {
                 hashes: vec![],
                 format: None,
                 delta_url: None,
-                protocol_version: None,
             },
             substrate::model::CmnEndpoint {
                 kind: "archive".to_string(),
@@ -164,7 +162,6 @@ impl SiteDir {
                     "{}/cmn/archive/{{hash}}.from.{{old_hash}}.tar.zst",
                     base_url
                 )),
-                protocol_version: None,
             },
             substrate::model::CmnEndpoint {
                 kind: "taste".to_string(),
@@ -173,7 +170,6 @@ impl SiteDir {
                 hashes: vec![],
                 format: None,
                 delta_url: None,
-                protocol_version: None,
             },
         ]
     }

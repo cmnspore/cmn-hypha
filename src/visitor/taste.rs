@@ -86,7 +86,7 @@ async fn taste_download_lib(
     synapse_url: Option<&str>,
     synapse_token_secret: Option<&str>,
 ) -> Result<crate::output::TasteDownloadOutput, crate::HyphaError> {
-    let cache = CacheDir::new();
+    let cache = CacheDir::new()?;
     fetch_spore_to_cache(sink, &cache, uri_str).await?;
     let domain_cache = cache.domain(&uri.domain);
     let spore_path = domain_cache.spore_path(hash);
@@ -172,7 +172,7 @@ async fn taste_record_lib(
     domain_for_signing: Option<&str>,
     now_epoch_ms: u64,
 ) -> Result<crate::output::TasteRecordOutput, crate::HyphaError> {
-    let cache = CacheDir::new();
+    let cache = CacheDir::new()?;
     let domain_cache = cache.domain(&uri.domain);
 
     let spore_path = domain_cache.spore_path(hash);
@@ -203,7 +203,7 @@ async fn taste_record_lib(
     };
 
     // Resolve domain + synapse: CLI args > [taste] config > [defaults] config
-    let config = crate::config::HyphaConfig::load();
+    let config = crate::config::HyphaConfig::load()?;
     let effective_domain = domain_for_signing
         .or(config.defaults.taste.domain.as_deref())
         .or(config.defaults.domain.as_deref());
@@ -257,7 +257,7 @@ async fn taste_domain_download_lib(
     uri_str: &str,
     uri: &CmnUri,
 ) -> Result<crate::output::TasteDownloadOutput, crate::HyphaError> {
-    let cache = CacheDir::new();
+    let cache = CacheDir::new()?;
     let domain_cache = cache.domain(&uri.domain);
 
     let entry = get_cmn_entry(sink, &domain_cache, cache.cmn_ttl_ms).await?;
@@ -300,7 +300,7 @@ fn taste_domain_record_lib(
     notes: Option<&str>,
     now_epoch_ms: u64,
 ) -> Result<crate::output::TasteRecordOutput, crate::HyphaError> {
-    let cache = CacheDir::new();
+    let cache = CacheDir::new()?;
     let domain_cache = cache.domain(&uri.domain);
 
     if !domain_cache.mycelium_dir().exists() {

@@ -34,11 +34,9 @@ pub fn init_identity_with_site(domain: &str, site: &SiteDir) -> anyhow::Result<I
 
     let newly_created = !site.private_key_path().exists();
     let verifying_key = if !newly_created {
-        // Identity already exists - load existing keypair and update DNS record
-        let pem_content = fs::read_to_string(site.private_key_path())?;
-        let signing_key = SigningKey::from_pkcs8_pem(&pem_content)
-            .map_err(|e| anyhow::anyhow!("Invalid private key PEM: {}", e))?;
-        signing_key.verifying_key()
+        // Identity already exists — load it (with the same permission check the
+        // signing paths use) to derive the public key.
+        load_signing_key_with_site(site)?.verifying_key()
     } else {
         // Generate new keypair
         let mut secret_bytes = [0u8; 32];
@@ -111,7 +109,9 @@ pub fn sign_json_with_site<T: Serialize>(
     value: &T,
 ) -> Result<String, JsonSignError> {
     let signing_key = load_signing_key_with_site(site)?;
-    compute_signature(value, SignatureAlgorithm::Ed25519, &signing_key.to_bytes())
+    // Zeroize the raw scalar copy that `to_bytes()` produces.
+    let key_bytes = zeroize::Zeroizing::new(signing_key.to_bytes());
+    compute_signature(value, SignatureAlgorithm::Ed25519, &*key_bytes)
         .map_err(|e| JsonSignError::Jcs(e.to_string()))
 }
 
@@ -145,7 +145,8 @@ fn load_signing_key_with_site(site: &SiteDir) -> anyhow::Result<SigningKey> {
         }
     }
 
-    let pem_content = fs::read_to_string(private_key_path)?;
+    // Hold the secret PEM in a buffer that is zeroized on drop.
+    let pem_content = zeroize::Zeroizing::new(fs::read_to_string(private_key_path)?);
     SigningKey::from_pkcs8_pem(&pem_content)
         .map_err(|e| anyhow::anyhow!("Invalid private key PEM: {}", e))
 }

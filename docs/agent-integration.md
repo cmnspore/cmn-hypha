@@ -102,7 +102,7 @@ Given a need for "{CAPABILITY}", find candidate spores:
 3. For top 3 candidates, run: hypha sense <uri>  (URI uses b3.<hash> format)
 4. Verify all have trace.verified.core_signature: true
 5. For the best candidate, run: hypha taste <uri> --synapse {SYNAPSE_URL}
-6. Read code at result.cache_path — check for security issues, intent consistency
+6. Read code at result.cache_path — check for security issues, intent consistency, and auto-execution/config surfaces (build scripts, package manager configs, editor configs, shell hooks, CI files, language-specific runners)
 7. If safe: hypha taste <uri> --verdict safe --notes "..."
 8. Return ranked list with: uri, name, synopsis, license, domain, taste verdict
 ```
@@ -115,12 +115,13 @@ Taste and spawn spore {URI} into the project:
 1. Run: hypha taste {URI} --synapse {SYNAPSE_URL}
 2. Read code at result.cache_path — review for security, compare with result.parent.cache_path
 3. Check result.others_tastes for reference (others' verdicts are advisory, not authoritative)
-4. Record verdict: hypha taste {URI} --verdict safe --notes "..."
-5. Run: hypha spawn {URI} {TARGET_DIR}
-6. If code == "NOT_TASTED", go to step 1
-7. If code == "DIR_EXISTS", choose a new directory name
-8. Read result.path to locate the working copy
-9. If result.can_grow == true, note that future updates via `hypha grow` are available
+4. Remember `.git` and `.cmn` are protected receive-time control paths, not a complete sandbox; inspect build scripts, package manager configs, editor configs, shell hooks, CI files, and language-specific runners
+5. Record verdict: hypha taste {URI} --verdict safe --notes "..."
+6. Run: hypha spawn {URI} {TARGET_DIR}
+7. If code == "NOT_TASTED", go to step 1
+8. If code == "DIR_EXISTS", choose a new directory name
+9. Read result.path to locate the working copy
+10. If result.can_grow == true, note that future updates via `hypha grow` are available
 ```
 
 ### 2.3 Evolve and Release

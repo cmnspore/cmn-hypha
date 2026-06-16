@@ -1,5 +1,20 @@
 use super::*;
 
+/// Remove and recreate a directory so extraction/cloning starts from empty.
+fn reset_dir(dir: &std::path::Path) -> Result<(), crate::HyphaError> {
+    if dir.exists() {
+        std::fs::remove_dir_all(dir).map_err(|e| {
+            crate::HyphaError::new("bond_error", format!("Failed to reset content dir: {}", e))
+        })?;
+    }
+    std::fs::create_dir_all(dir).map_err(|e| {
+        crate::HyphaError::new(
+            "bond_error",
+            format!("Failed to recreate content dir: {}", e),
+        )
+    })
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub(super) struct BondIndexEntry {
     hash: String,
@@ -205,7 +220,7 @@ pub(super) async fn bond_in_dir(
 
     // Pre-check taste status for all refs. If any are not tasted or toxic,
     // return the full list so the caller can act on all of them at once.
-    let cache = CacheDir::new();
+    let cache = CacheDir::new()?;
     {
         let mut taste_refs = Vec::new();
         let mut any_blocked = false;
@@ -280,28 +295,10 @@ pub(super) async fn bond_in_dir(
         let domain_cache = cache.domain(domain);
 
         let entry = get_cmn_entry(sink, &domain_cache, cache.cmn_ttl_ms).await?;
-
         let capsule = primary_capsule(&entry)?;
-        let public_key = capsule.key.clone();
         let ep = &capsule.endpoints;
-
-        let manifest = fetch_spore_manifest(capsule, hash).await.map_err(|e| {
-            crate::HyphaError::new(
-                "manifest_failed",
-                format!("Failed to fetch spore {}: {}", hash, e),
-            )
-        })?;
-        let spore = decode_spore_manifest(&manifest)?;
-
-        let author_key = embedded_spore_author_key(&manifest);
-        let ak = author_key.as_deref().unwrap_or(&public_key);
-
-        verify_manifest_two_key_signatures(&manifest, &public_key, ak).map_err(|e| {
-            crate::HyphaError::new(
-                "sig_failed",
-                format!("Signature verification failed for {}: {}", hash, e),
-            )
-        })?;
+        let (manifest, spore) =
+            fetch_verified_spore(sink, capsule, hash, &domain_cache, cache.cmn_ttl_ms).await?;
 
         std::fs::create_dir_all(&content_dir).map_err(|e| {
             crate::HyphaError::new(
@@ -311,11 +308,10 @@ pub(super) async fn bond_in_dir(
         })?;
 
         let manifest_path = ref_dir.join("spore.json");
-        std::fs::write(
-            &manifest_path,
-            serde_json::to_string_pretty(&spore).unwrap_or_default(),
-        )
-        .map_err(|e| {
+        let manifest_pretty = serde_json::to_string_pretty(&spore).map_err(|e| {
+            crate::HyphaError::new("bond_error", format!("Failed to format spore.json: {}", e))
+        })?;
+        std::fs::write(&manifest_path, manifest_pretty).map_err(|e| {
             crate::HyphaError::new("bond_error", format!("Failed to write spore.json: {}", e))
         })?;
 
@@ -337,20 +333,7 @@ pub(super) async fn bond_in_dir(
                 for archive_ep in &archive_endpoints {
                     let archive_url = build_archive_url_from_endpoint(archive_ep, hash)?;
 
-                    if content_dir.exists() {
-                        std::fs::remove_dir_all(&content_dir).map_err(|e| {
-                            crate::HyphaError::new(
-                                "bond_error",
-                                format!("Failed to reset content dir: {}", e),
-                            )
-                        })?;
-                    }
-                    std::fs::create_dir_all(&content_dir).map_err(|e| {
-                        crate::HyphaError::new(
-                            "bond_error",
-                            format!("Failed to recreate content dir: {}", e),
-                        )
-                    })?;
+                    reset_dir(&content_dir)?;
 
                     match download_and_extract_to_dir(
                         &archive_url,
@@ -375,22 +358,9 @@ pub(super) async fn bond_in_dir(
                 }
             } else if let Some(git_url) = dist_git_url(dist_entry) {
                 let git_ref = dist_git_ref(dist_entry);
-                if content_dir.exists() {
-                    std::fs::remove_dir_all(&content_dir).map_err(|e| {
-                        crate::HyphaError::new(
-                            "bond_error",
-                            format!("Failed to reset content dir: {}", e),
-                        )
-                    })?;
-                }
-                std::fs::create_dir_all(&content_dir).map_err(|e| {
-                    crate::HyphaError::new(
-                        "bond_error",
-                        format!("Failed to recreate content dir: {}", e),
-                    )
-                })?;
+                reset_dir(&content_dir)?;
 
-                match clone_git_to_dir(git_url, git_ref, &content_dir).await {
+                match clone_git_to_dir(git_url, git_ref, &content_dir, &cache).await {
                     Ok(_) => {
                         downloaded = true;
                         break;
@@ -410,6 +380,8 @@ pub(super) async fn bond_in_dir(
                 format!("Failed to download content for {}", hash),
             ));
         }
+
+        verify_downloaded_content(sink, &ref_dir, &content_dir, &manifest, hash, &domain_cache)?;
 
         let name = spore.capsule.core.name.as_str();
 
@@ -492,11 +464,14 @@ pub(super) fn write_refs_json(
     let index = BondIndexFile {
         bonds: entries.to_vec(),
     };
-    std::fs::write(
-        path,
-        serde_json::to_string_pretty(&index).unwrap_or_default(),
-    )
-    .map_err(|e| crate::HyphaError::new("bond_write_failed", e.to_string()))
+    let pretty = serde_json::to_string_pretty(&index).map_err(|e| {
+        crate::HyphaError::new(
+            "bond_write_failed",
+            format!("Failed to format bonds: {}", e),
+        )
+    })?;
+    std::fs::write(path, pretty)
+        .map_err(|e| crate::HyphaError::new("bond_write_failed", e.to_string()))
 }
 
 #[cfg(test)]

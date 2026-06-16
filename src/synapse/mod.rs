@@ -4,9 +4,14 @@ use std::process::ExitCode;
 use crate::api::Output;
 use crate::config::{self, HyphaConfig, SynapseNode};
 
+const JSON_FETCH_MAX_BYTES: usize = 8 * 1024 * 1024;
+
 /// List all configured Synapse nodes
 pub fn handle_list(out: &Output) -> ExitCode {
-    let config = HyphaConfig::load();
+    let config = match HyphaConfig::load() {
+        Ok(config) => config,
+        Err(e) => return out.error_hypha(&e),
+    };
     let default_domain = config.defaults.synapse.as_deref();
     let domains = config::list_synapse_domains();
 
@@ -65,15 +70,18 @@ pub async fn handle_info(
         );
     }
 
-    let health: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            return out.error(
-                "synapse_error",
-                &format!("Failed to parse synapse health: {}", e),
-            )
-        }
-    };
+    let health: serde_json::Value =
+        match substrate::client::json_from_response(response, &url, Some(JSON_FETCH_MAX_BYTES))
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return out.error(
+                    "synapse_error",
+                    &format!("Failed to parse synapse health: {}", e),
+                )
+            }
+        };
 
     // Cache health.json to the node directory
     if let Ok(domain) = config::domain_from_url(&resolved.url) {
@@ -91,6 +99,10 @@ pub async fn handle_info(
 
 /// Add a Synapse node (domain extracted from URL)
 pub fn handle_add(out: &Output, url: &str) -> ExitCode {
+    if let Err(e) = config::validate_synapse_url(url) {
+        return out.error_hypha(&e);
+    }
+
     let domain = match config::domain_from_url(url) {
         Ok(d) => d,
         Err(e) => return out.error_hypha(&e),
@@ -107,7 +119,10 @@ pub fn handle_add(out: &Output, url: &str) -> ExitCode {
 
     // Auto-set default if this is the first node
     let domains = config::list_synapse_domains();
-    let mut config = HyphaConfig::load();
+    let mut config = match HyphaConfig::load() {
+        Ok(config) => config,
+        Err(e) => return out.error_hypha(&e),
+    };
     if domains.len() == 1 && config.defaults.synapse.is_none() {
         config.defaults.synapse = Some(domain.clone());
         if let Err(e) = config.save() {
@@ -133,7 +148,10 @@ pub fn handle_remove(out: &Output, domain: &str) -> ExitCode {
     }
 
     // Clear default if it was this node
-    let mut cfg = HyphaConfig::load();
+    let mut cfg = match HyphaConfig::load() {
+        Ok(cfg) => cfg,
+        Err(e) => return out.error_hypha(&e),
+    };
     if cfg.defaults.synapse.as_deref() == Some(domain) {
         cfg.defaults.synapse = None;
         if let Err(e) = cfg.save() {
@@ -159,7 +177,10 @@ pub fn handle_use(out: &Output, domain: &str) -> ExitCode {
         }
     };
 
-    let mut cfg = HyphaConfig::load();
+    let mut cfg = match HyphaConfig::load() {
+        Ok(cfg) => cfg,
+        Err(e) => return out.error_hypha(&e),
+    };
     cfg.defaults.synapse = Some(domain.to_string());
 
     if let Err(e) = cfg.save() {
@@ -221,8 +242,10 @@ pub async fn handle_discover(
     };
 
     let opts = match resolved.token_secret.as_deref() {
-        Some(t) => substrate::client::FetchOptions::with_bearer_token(t),
-        None => Default::default(),
+        Some(t) => {
+            substrate::client::FetchOptions::with_bearer_token(t).max_bytes(JSON_FETCH_MAX_BYTES)
+        }
+        None => substrate::client::FetchOptions::with_max_bytes(JSON_FETCH_MAX_BYTES),
     };
 
     let results = match substrate::client::search(

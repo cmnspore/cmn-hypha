@@ -183,11 +183,16 @@ rm -rf /tmp/cmn-test && unset CMN_HOME
 
 ## Documentation
 
-Regenerate the CLI reference with:
+Regenerate the CLI reference with the generator script (it prepends the
+`docs/cli.md` header, then appends `hypha --help --recursive --output markdown`):
 
 ```bash
-hypha --help-markdown
+scripts/projects/cmn-hypha/generate-cli-doc.sh            # from the repo root
+scripts/projects/cmn-hypha/generate-cli-doc.sh --dry-run  # CI check: fails if stale
 ```
+
+> Running the bare `hypha --help --recursive --output markdown` only prints the
+> body — use the script so the header stays in sync and the `--dry-run` check passes.
 
 | Document | Description |
 |----------|-------------|

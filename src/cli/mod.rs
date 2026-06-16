@@ -3,13 +3,18 @@
 //! Keep command descriptions, examples, and argument docs here so both runtime
 //! help and generated reference docs stay aligned.
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
+
+mod run;
+
+pub use run::execute;
 
 #[derive(Parser)]
 #[command(name = "hypha")]
 #[command(version)]
 #[command(about = "CMN Client - A bio-digital extension for Visitors to release and absorb Spores")]
+#[command(disable_help_subcommand = true)]
 #[command(after_long_help = concat!(
     "All output follows Agent-First Data format:\n",
     "  {\"code\": \"ok\", \"result\": {...}, \"trace\": {...}}\n",
@@ -18,10 +23,16 @@ use serde::Serialize;
     "  hypha sense cmn://cmn.dev\n",
     "  hypha sense cmn://cmn.dev/", "b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2", "\n",
     "  hypha spawn cmn://cmn.dev/", "b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2", "\n",
-    "  hypha cache list",
+    "  hypha cache list\n",
+    "\n",
+    "More help:\n",
+    "  hypha <command> --help   Show one command layer\n",
+    "  hypha --help --recursive Expand every command and flag\n",
+    "  hypha --help --recursive --output markdown\n",
+    "                            Generate recursive Markdown reference",
 ))]
 pub struct Cli {
-    /// Output format
+    /// Output format: json (default), yaml, plain; help also accepts markdown
     #[arg(short, long, default_value = "json", global = true)]
     pub output: String,
 
@@ -44,15 +55,20 @@ pub enum Commands {
         "URI types:\n",
         "  cmn://DOMAIN                       List all spores on a site\n",
         "  cmn://DOMAIN/HASH                  View a specific spore\n",
+        "  cmn://DOMAIN --id SPORE_ID         View latest spore with id from a site\n",
         "\n",
         "Examples:\n",
         "  hypha sense cmn://cmn.dev\n",
+        "  hypha sense cmn://cmn.dev --id cmn-spec\n",
         "  hypha sense cmn://cmn.dev/", "b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2", "\n",
         "  hypha sense cmn://cmn.dev -o yaml",
     ))]
     Sense {
         /// CMN URI (cmn://DOMAIN or cmn://DOMAIN/HASH)
         uri: String,
+        /// Spore id to resolve from the domain's latest mycelium inventory
+        #[arg(long)]
+        id: Option<String>,
     },
 
     /// Evaluate spore: download for review, or record a verdict
@@ -106,11 +122,11 @@ pub enum Commands {
         /// Target directory (default: ./<spore-id>)
         directory: Option<String>,
         /// Initialize version control after spawn (e.g., --vcs git)
-        #[arg(long, value_name = "TYPE")]
-        vcs: Option<String>,
+        #[arg(long, value_enum, value_name = "TYPE")]
+        vcs: Option<VcsArg>,
         /// Preferred distribution source: archive (default) or git
-        #[arg(long, value_name = "SOURCE")]
-        dist: Option<String>,
+        #[arg(long, value_enum, value_name = "SOURCE")]
+        dist: Option<DistArg>,
         /// Fetch bonds after spawn
         #[arg(long)]
         bond: bool,
@@ -132,8 +148,8 @@ Examples:
   hypha grow --bond --synapse synapse.cmn.dev")]
     Grow {
         /// Override distribution source: archive or git
-        #[arg(long, value_name = "SOURCE")]
-        dist: Option<String>,
+        #[arg(long, value_enum, value_name = "SOURCE")]
+        dist: Option<DistArg>,
         /// Synapse to query for updates (domain or URL)
         #[arg(long)]
         synapse: Option<String>,
@@ -308,8 +324,8 @@ Examples:
         /// CMN URI (e.g., cmn://cmn.dev/HASH)
         uri: String,
         /// Direction: in (descendants, default) or out (ancestors)
-        #[arg(long)]
-        direction: Option<String>,
+        #[arg(long, value_enum)]
+        direction: Option<DirectionArg>,
         /// Synapse server (domain or URL, default: configured default)
         #[arg(long)]
         synapse: Option<String>,
@@ -381,6 +397,116 @@ Examples:
         #[serde(flatten)]
         action: ConfigAction,
     },
+
+    /// Install, uninstall, or inspect the bundled Hypha agent skill
+    #[command(after_long_help = "\
+Examples:
+  hypha skill status
+  hypha skill install --agent codex
+  hypha skill install --agent claude-code --scope project
+  hypha skill uninstall --agent opencode --skills-dir /tmp/skills --force")]
+    Skill {
+        #[command(subcommand)]
+        #[serde(flatten)]
+        action: SkillCommand,
+    },
+}
+
+#[derive(Subcommand, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SkillCommand {
+    /// Report whether the bundled Hypha skill is installed and current
+    Status(SkillOptionsArg),
+    /// Install or refresh the bundled Hypha skill
+    Install(SkillOptionsArg),
+    /// Remove the bundled Hypha skill
+    Uninstall(SkillOptionsArg),
+}
+
+#[derive(Args, Serialize)]
+pub struct SkillOptionsArg {
+    /// Agent target to manage
+    #[arg(long, value_enum, default_value = "all")]
+    pub agent: SkillAgentArg,
+    /// Install scope
+    #[arg(long, value_enum, default_value = "personal")]
+    pub scope: SkillScopeArg,
+    /// Explicit skills directory; requires a single --agent
+    #[arg(long)]
+    pub skills_dir: Option<String>,
+    /// Overwrite or remove an unmanaged skill at the target path
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkillAgentArg {
+    All,
+    Codex,
+    ClaudeCode,
+    Opencode,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillScopeArg {
+    Personal,
+    Project,
+}
+
+/// Preferred distribution source for spawn/grow.
+#[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum DistArg {
+    Archive,
+    Git,
+}
+
+impl DistArg {
+    /// Canonical string passed to the library layer.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Archive => "archive",
+            Self::Git => "git",
+        }
+    }
+}
+
+/// Version-control initialization choice for spawn.
+#[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum VcsArg {
+    Git,
+    None,
+}
+
+impl VcsArg {
+    /// Canonical string passed to the library layer.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Git => "git",
+            Self::None => "none",
+        }
+    }
+}
+
+/// Lineage traversal direction.
+#[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum DirectionArg {
+    In,
+    Out,
+}
+
+impl DirectionArg {
+    /// Canonical string passed to the library layer.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::In => "in",
+            Self::Out => "out",
+        }
+    }
 }
 
 #[derive(Subcommand, Serialize)]
@@ -511,13 +637,17 @@ Examples:
     #[command(after_long_help = "\
 Examples:
   hypha mycelium status
-  hypha mycelium status cmn.dev")]
+  hypha mycelium status cmn.dev
+  hypha mycelium status cmn.dev --id cmn-spec --site-path deploy/cmn.dev")]
     Status {
         /// Domain name (optional, lists all if not specified)
         domain: Option<String>,
         /// Custom site directory
         #[arg(long)]
         site_path: Option<String>,
+        /// Spore id to resolve from the local mycelium inventory
+        #[arg(long)]
+        id: Option<String>,
     },
     /// Start a local HTTP server to serve the site (for debugging)
     #[command(after_long_help = "\
@@ -722,6 +852,16 @@ Dotted keys map to TOML sections:
                         Key trust refresh mode: expired | always | offline
   cache.key_trust_synapse_witness_mode
                         Key trust fallback when domain is offline: allow | require_domain
+  cache.spore_max_download_bytes
+                        Max spore archive download bytes
+  cache.spore_max_extract_bytes
+                        Max total bytes extracted from a spore archive
+  cache.spore_max_extract_files
+                        Max files extracted from a spore archive
+  cache.spore_max_extract_file_bytes
+                        Max bytes extracted for one spore archive file
+  cache.spore_reject_path_components
+                        TOML string array of protected received path components
   cache.clock_skew_tolerance_s
                         Clock skew tolerance in seconds for key trust TTL (default: 300)
   defaults.synapse      Default synapse domain
@@ -735,6 +875,8 @@ Examples:
   hypha config set cache.key_trust_ttl_s 604800
   hypha config set cache.key_trust_refresh_mode offline
   hypha config set cache.key_trust_synapse_witness_mode require_domain
+  hypha config set cache.spore_max_download_bytes 1073741824
+  hypha config set cache.spore_reject_path_components '[\".git\", \".cmn\"]'
   hypha config set cache.path /tmp/hypha-cache
   hypha config set defaults.synapse synapse.cmn.dev
   hypha config set defaults.taste.synapse cmnhub.com
@@ -747,37 +889,48 @@ Examples:
     },
 }
 
+/// Build hypha's CLI argument-error envelope.
+///
+/// Keeps a stable machine-readable shape for argument/parse failures
+/// (`error_code`, `retryable`) on top of the agent-first-data error builder,
+/// which no longer emits those fields itself.
+pub(crate) fn cli_error_value(message: &str, hint: &str) -> serde_json::Value {
+    let mut value = agent_first_data::build_json_error(
+        message,
+        Some(hint),
+        Some(serde_json::json!({ "duration_ms": 0 })),
+    );
+    if let serde_json::Value::Object(map) = &mut value {
+        map.insert(
+            "error_code".to_string(),
+            serde_json::Value::String("invalid_request".to_string()),
+        );
+        map.insert("retryable".to_string(), serde_json::Value::Bool(false));
+    }
+    value
+}
+
 pub fn parse_or_exit() -> Cli {
     let raw: Vec<String> = std::env::args().collect();
 
-    // --help: recursive plain-text help (all subcommands expanded)
-    if raw.iter().any(|a| a == "--help" || a == "-h") {
-        let subcommand_path: Vec<&str> = raw[1..]
-            .iter()
-            .take_while(|a| !a.starts_with('-'))
-            .map(|s| s.as_str())
-            .collect();
-        let mut stdout = std::io::stdout();
-        let _ = std::io::Write::write_all(
-            &mut stdout,
-            agent_first_data::cli_render_help(&Cli::command(), &subcommand_path).as_bytes(),
-        );
-        std::process::exit(0);
-    }
-    // --help-markdown: Markdown for doc generation
-    if raw.iter().any(|a| a == "--help-markdown") {
-        let subcommand_path: Vec<&str> = raw[1..]
-            .iter()
-            .take_while(|a| !a.starts_with('-'))
-            .map(|s| s.as_str())
-            .collect();
-        let mut stdout = std::io::stdout();
-        let _ = std::io::Write::write_all(
-            &mut stdout,
-            agent_first_data::cli_render_help_markdown(&Cli::command(), &subcommand_path)
-                .as_bytes(),
-        );
-        std::process::exit(0);
+    match agent_first_data::cli_handle_help_or_continue(
+        &raw,
+        &Cli::command(),
+        &agent_first_data::HelpConfig::human_cli_default(),
+    ) {
+        Ok(Some(help)) => {
+            let mut stdout = std::io::stdout();
+            let _ = std::io::Write::write_all(&mut stdout, help.as_bytes());
+            std::process::exit(0);
+        }
+        Ok(None) => {}
+        Err(err) => {
+            let mut stdout = std::io::stdout();
+            let message = agent_first_data::output_json(&err);
+            let _ = std::io::Write::write_all(&mut stdout, message.as_bytes());
+            let _ = std::io::Write::write_all(&mut stdout, b"\n");
+            std::process::exit(2);
+        }
     }
 
     Cli::try_parse().unwrap_or_else(|e| {
@@ -791,10 +944,17 @@ pub fn parse_or_exit() -> Cli {
             let _ = std::io::Write::write_all(&mut stdout, b"\n");
             std::process::exit(0);
         }
+        if matches!(e.kind(), clap::error::ErrorKind::DisplayHelp) {
+            let mut stdout = std::io::stdout();
+            let _ = std::io::Write::write_all(&mut stdout, e.to_string().as_bytes());
+            std::process::exit(0);
+        }
 
         let mut stdout = std::io::stdout();
-        let message =
-            agent_first_data::output_json(&agent_first_data::build_cli_error(&e.to_string(), None));
+        let message = agent_first_data::output_json(&cli_error_value(
+            &e.to_string(),
+            "run hypha --help to inspect all commands and flags",
+        ));
         let _ = std::io::Write::write_all(&mut stdout, message.as_bytes());
         let _ = std::io::Write::write_all(&mut stdout, b"\n");
         std::process::exit(2);

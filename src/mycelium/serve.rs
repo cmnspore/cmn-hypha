@@ -5,6 +5,20 @@ use super::inventory::resolve_public_file_path;
 use crate::api::Output;
 use crate::site::{self, SiteDir};
 
+const JSON_FETCH_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+fn sanitize_log_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_control() {
+            out.extend(ch.escape_default());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 pub async fn handle_pulse(
     out: &Output,
     synapse_arg: Option<&str>,
@@ -50,8 +64,9 @@ pub async fn handle_pulse(
         Err(e) => return out.error("NETWORK_ERR", &format!("HTTP client error: {}", e)),
     };
     let opts = match &resolved.token_secret {
-        Some(token) => substrate::client::FetchOptions::with_bearer_token(token),
-        None => Default::default(),
+        Some(token) => substrate::client::FetchOptions::with_bearer_token(token)
+            .max_bytes(JSON_FETCH_MAX_BYTES),
+        None => substrate::client::FetchOptions::with_max_bytes(JSON_FETCH_MAX_BYTES),
     };
 
     match substrate::client::post_synapse_pulse(&client, base_url, &payload, opts).await {
@@ -70,7 +85,6 @@ pub fn handle_serve(
     site_path: Option<&str>,
     port: u16,
 ) -> ExitCode {
-    use std::io::Read;
     use tiny_http::{Header, Response, Server};
 
     // Resolve site directory
@@ -157,15 +171,20 @@ pub fn handle_serve(
     // Note: ok() returns ExitCode but we continue serving, so ignore it
     let _ = out.ok(&data);
 
+    // Canonical public root used to verify that every served file is actually
+    // inside public/ (defeats symlink escapes that a lexical check would miss).
+    let canonical_public = std::fs::canonicalize(&public_dir).unwrap_or(public_dir.clone());
+
     // Serve requests
     for request in server.incoming_requests() {
         let request_url = request.url().to_string();
+        let request_url_log = sanitize_log_text(&request_url);
         let file_path = match resolve_public_file_path(&public_dir, &request_url) {
             Some(path) => path,
             None => {
                 out.warn(
                     "HTTP_FORBIDDEN",
-                    &format!("GET {} (invalid path)", request_url),
+                    &format!("GET {} (invalid path)", request_url_log),
                 );
                 let response = Response::from_string("Forbidden").with_status_code(403);
                 let _ = request.respond(response);
@@ -178,70 +197,93 @@ pub fn handle_serve(
             .next()
             .unwrap_or_default()
             .trim_start_matches('/');
+        let url_path_log = sanitize_log_text(url_path);
 
-        if !file_path.starts_with(&public_dir) {
+        // Resolve symlinks before serving; a missing target → 404.
+        let canonical = match std::fs::canonicalize(&file_path) {
+            Ok(c) => c,
+            Err(_) => {
+                out.warn("HTTP_NOT_FOUND", &format!("GET /{}", url_path_log));
+                let response = Response::from_string("Not Found").with_status_code(404);
+                let _ = request.respond(response);
+                continue;
+            }
+        };
+
+        if !canonical.starts_with(&canonical_public) {
             out.warn(
                 "HTTP_FORBIDDEN",
-                &format!("GET {} (path escape)", request_url),
+                &format!("GET {} (path escape)", request_url_log),
             );
             let response = Response::from_string("Forbidden").with_status_code(403);
             let _ = request.respond(response);
             continue;
         }
 
-        // Try to serve the file
-        if file_path.is_file() {
-            match std::fs::File::open(&file_path) {
-                Ok(mut file) => {
-                    let mut content = Vec::new();
-                    if file.read_to_end(&mut content).is_ok() {
-                        // Determine content type
-                        let content_type =
-                            match file_path.extension().and_then(std::ffi::OsStr::to_str) {
-                                Some("json") => "application/json",
-                                Some("html") => "text/html",
-                                Some("css") => "text/css",
-                                Some("js") => "application/javascript",
-                                Some("gz") => "application/gzip",
-                                _ => "application/octet-stream",
-                            };
-
-                        let header =
-                            Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes());
-
-                        let mut response = Response::from_data(content);
-                        if let Ok(h) = header {
-                            response = response.with_header(h);
-                        }
-
-                        // Add CORS header for debugging
-                        if let Ok(cors) =
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
-                        {
-                            response = response.with_header(cors);
-                        }
-
-                        out.warn("HTTP_OK", &format!("GET /{}", url_path));
-                        let _ = request.respond(response);
-                    } else {
-                        out.warn("HTTP_ERROR", &format!("GET /{} (read error)", url_path));
-                        let response =
-                            Response::from_string("Internal Server Error").with_status_code(500);
-                        let _ = request.respond(response);
-                    }
-                }
-                Err(_) => {
-                    out.warn("HTTP_NOT_FOUND", &format!("GET /{}", url_path));
-                    let response = Response::from_string("Not Found").with_status_code(404);
-                    let _ = request.respond(response);
-                }
-            }
-        } else {
-            out.warn("HTTP_NOT_FOUND", &format!("GET /{}", url_path));
+        if !canonical.is_file() {
+            out.warn("HTTP_NOT_FOUND", &format!("GET /{}", url_path_log));
             let response = Response::from_string("Not Found").with_status_code(404);
             let _ = request.respond(response);
+            continue;
+        }
+
+        match std::fs::File::open(&canonical) {
+            Ok(file) => {
+                let content_type = match canonical.extension().and_then(std::ffi::OsStr::to_str) {
+                    Some("json") => "application/json",
+                    Some("html") => "text/html",
+                    Some("css") => "text/css",
+                    Some("js") => "application/javascript",
+                    Some("gz") => "application/gzip",
+                    _ => "application/octet-stream",
+                };
+
+                // Stream the file instead of buffering it entirely in memory.
+                let mut response = Response::from_file(file);
+                if let Ok(h) = Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()) {
+                    response = response.with_header(h);
+                }
+                // Prevent browsers from MIME-sniffing the octet-stream fallback.
+                if let Ok(h) = Header::from_bytes(&b"X-Content-Type-Options"[..], &b"nosniff"[..]) {
+                    response = response.with_header(h);
+                }
+
+                out.warn("HTTP_OK", &format!("GET /{}", url_path_log));
+                let _ = request.respond(response);
+            }
+            Err(_) => {
+                out.warn("HTTP_NOT_FOUND", &format!("GET /{}", url_path_log));
+                let response = Response::from_string("Not Found").with_status_code(404);
+                let _ = request.respond(response);
+            }
         }
     }
 
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_log_text_leaves_normal_paths_unchanged() {
+        assert_eq!(
+            sanitize_log_text("/archive/b3.hash.tar.zst?download=1"),
+            "/archive/b3.hash.tar.zst?download=1"
+        );
+    }
+
+    #[test]
+    fn sanitize_log_text_escapes_control_characters() {
+        let sanitized = sanitize_log_text("/ok\x1b[31m\nnext");
+        assert!(
+            !sanitized.chars().any(char::is_control),
+            "sanitized log text still has controls: {:?}",
+            sanitized
+        );
+        assert!(sanitized.contains("\\u{1b}"));
+        assert!(sanitized.contains("\\n"));
+    }
 }

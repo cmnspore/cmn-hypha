@@ -102,7 +102,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
             return out.error(
                 "dir_error",
                 &format!("Failed to get working directory: {}", e),
-            )
+            );
         }
     };
 
@@ -122,7 +122,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
             return out.error(
                 "read_error",
                 &format!("Failed to read spore.core.json: {}", e),
-            )
+            );
         }
     };
 
@@ -136,7 +136,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
             return out.error(
                 "schema_error",
                 &format!("spore.core.json schema validation failed: {}", e),
-            )
+            );
         }
     };
     if schema_type != substrate::SchemaType::SporeCore {
@@ -398,7 +398,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
                 return out.error(
                     "read_error",
                     &format!("Spore manifest exists but cannot be read: {}", e),
-                )
+                );
             }
         };
         let existing: serde_json::Value = match serde_json::from_str(&existing_json) {
@@ -407,7 +407,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
                 return out.error(
                     "parse_error",
                     &format!("Spore manifest exists but is invalid JSON: {}", e),
-                )
+                );
             }
         };
 
@@ -455,7 +455,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
             return out.error(
                 "serialize_error",
                 &format!("Failed to format spore manifest: {}", e),
-            )
+            );
         }
     };
 
@@ -554,30 +554,8 @@ fn create_tar_archive_from_files(
 }
 
 /// Look up the previous hash for a spore id from the mycelium inventory.
-fn find_previous_hash(site: &SiteDir, _domain: &str, spore_id: &str) -> Option<String> {
-    let manifest_path = site.cmn_json_path();
-    let cmn_content = std::fs::read_to_string(&manifest_path).ok()?;
-    let entry: substrate::CmnEntry = serde_json::from_str(&cmn_content).ok()?;
-
-    let mycelium_hash = entry.primary_capsule().ok()?.mycelium_hash()?.to_string();
-    let mycelium_path = site.mycelium_dir().join(format!("{}.json", mycelium_hash));
-    let mycelium_content = std::fs::read_to_string(&mycelium_path).ok()?;
-    let mycelium: substrate::Mycelium = serde_json::from_str(&mycelium_content).ok()?;
-
-    mycelium
-        .capsule
-        .core
-        .spores
-        .iter()
-        .find(|s| {
-            if s.id.is_empty() {
-                // Legacy: match by name for spores without id
-                false
-            } else {
-                s.id == spore_id
-            }
-        })
-        .map(|s| s.hash.clone())
+fn find_previous_hash(site: &SiteDir, domain: &str, spore_id: &str) -> Option<String> {
+    crate::mycelium::find_local_spore_hash(site, domain, spore_id)
 }
 
 /// Generate a delta archive using zstd dictionary compression.

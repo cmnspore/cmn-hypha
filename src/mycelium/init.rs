@@ -189,7 +189,6 @@ fn handle_init_hub(
         hashes: vec![],
         format: None,
         delta_url: None,
-        protocol_version: None,
     };
 
     let cmn_path = real_site.cmn_json_path();
@@ -205,8 +204,9 @@ fn handle_init_hub(
     // Build and sign cmn.json entry
     let capsules = vec![substrate::CmnCapsuleEntry {
         uri: substrate::build_domain_uri(&domain),
+        serial: 1,
         key: info.public_key.clone(),
-        previous_keys: vec![],
+        history: vec![],
         endpoints: vec![taste_endpoints],
     }];
 
@@ -222,7 +222,6 @@ fn handle_init_hub(
 
     let entry = substrate::CmnEntry {
         schema: substrate::CMN_SCHEMA.to_string(),
-        protocol_versions: vec!["v1".to_string()],
         capsules,
         capsule_signature: entry_signature,
     };
@@ -257,7 +256,10 @@ fn handle_init_hub(
         );
     }
 
-    let mut config = crate::config::HyphaConfig::load();
+    let mut config = match crate::config::HyphaConfig::load() {
+        Ok(config) => config,
+        Err(e) => return out.error_hypha(&e),
+    };
     config.defaults.taste.domain = Some(domain.clone());
     config.defaults.taste.synapse = Some(hub_domain.to_string());
     if let Err(e) = config.save() {

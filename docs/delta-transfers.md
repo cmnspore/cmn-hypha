@@ -54,5 +54,5 @@ Delta transfers are optional and best-effort:
 - **Compression library**: zstd with dictionary support (e.g., `zstd` crate in Rust, `zstandard` in Python, `fzstd` in JS)
 - **Dictionary**: the raw decompressed tar bytes of the old archive (not the .tar.zst, the decompressed .tar)
 - **Output**: raw tar bytes of the new archive, which are then zstd-compressed for local caching
-- **Size budget**: clients should enforce a maximum decompressed size to prevent zip bombs (hypha uses `max_extract_bytes` from config, default 512 MB)
+- **Size budget**: clients should enforce a maximum decompressed size to prevent zip bombs (hypha uses `spore_max_extract_bytes` from config, default 512 MB)
 - **Cache reuse**: after applying a delta, cache the resulting archive for future delta chains (v1 → v2 → v3)

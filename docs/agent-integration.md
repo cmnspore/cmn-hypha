@@ -88,6 +88,16 @@ hypha mycelium pulse --synapse https://synapse.cmn.dev \
   --file path/to/spore.json
 ```
 
+**Reading vs. writing bonds**: hypha deliberately has no `bond show`/query
+surface. Reading a spore's bonds is a generic structured-data job — use
+agent-first-data (afdata) `value`/`get`/`paths` against `spore.core.json`.
+Writing bonds always goes through `hatch bond set/remove/clear/sync`, since
+only hatch can produce a canonical, schema-validated `spore.core.json` (key
+ordering, `$schema`, and — for `sync` — internally resolved URIs). Use
+`hatch bond sync --relation <REL> --spec <FILE|-> [--check]` to reconcile a
+whole relation's bonds to a declarative spec in one call instead of hand
+diffing `set`/`remove` calls; see `docs/cli.md` for the spec format.
+
 ## 2. Skill Templates
 
 Ready-to-use prompt templates for orchestrating Hypha from an agent. `{SYNAPSE_URL}` can be any Synapse instance — a public one or one you run yourself (see [Deploying Synapse](/tools/synapse/synapse-deployment/)).
@@ -138,7 +148,7 @@ Release changes from {SOURCE_DIR} under {DOMAIN}:
 3. Run: hypha hatch --domain {DOMAIN} \
      --intent "{INTENT_1}" --intent "{INTENT_2}" \
      --mutations "{MUTATION_1}" --mutations "{MUTATION_2}"
-4. Verify code == "ok"
+4. Verify `kind == "result"`
 5. Run: hypha release --domain {DOMAIN}
 6. Parse result.uri for the published spore URI
 7. Deploy static files from ~/.cmn/mycelium/{DOMAIN}/public/ to web hosting

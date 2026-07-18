@@ -7,6 +7,7 @@ mod init;
 mod inventory;
 mod nutrients;
 mod serve;
+mod spores;
 
 pub use format::format_mycelium;
 pub use init::handle_init;
@@ -14,6 +15,7 @@ pub(crate) use inventory::{find_local_spore_hash, resolve_spore_ref};
 pub use inventory::{handle_status, update_inventory};
 pub use nutrients::{handle_nutrient_add, handle_nutrient_clear, handle_nutrient_remove};
 pub use serve::{handle_pulse, handle_serve};
+pub use spores::{handle_spore_unyank, handle_spore_yank};
 
 pub struct InitArgs<'a> {
     pub domain: Option<&'a str>,

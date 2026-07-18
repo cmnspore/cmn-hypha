@@ -10,10 +10,14 @@ use std::fs;
 #[test]
 fn test_version_json_output() {
     let env = TestEnv::new();
-    let output = env.hypha(&["--version"]);
+    let output = env.hypha(&["--version", "--output", "json"]);
     let text = combined_text(&output);
     let json = parse_json_last_line(&text);
-    assert_eq!(json["code"], "ok", "version should output ok: {}", text);
+    assert_eq!(
+        json["kind"], "result",
+        "version should output a result event: {}",
+        text
+    );
     assert!(
         json["result"]["version"].is_string(),
         "version should include version string: {}",
@@ -129,7 +133,11 @@ fn test_grow_not_spawned_dir() {
     let text = combined_text(&output);
     assert!(!output.status.success(), "grow should fail: {}", text);
     let json = parse_json_last_line(&text);
-    assert_eq!(json["code"], "grow_error", "should be grow_error: {}", text);
+    assert_eq!(
+        json["error"]["code"], "grow_error",
+        "should be grow_error: {}",
+        text
+    );
 }
 
 #[test]
@@ -193,7 +201,9 @@ fn test_error_returns_json() {
     );
     let json = parse_json_last_line(&stderr);
     assert!(
-        json["hint"].as_str().is_some_and(|h| !h.is_empty()),
+        json["error"]["hint"]
+            .as_str()
+            .is_some_and(|h| !h.is_empty()),
         "error should include an actionable hint: {}",
         stderr
     );
@@ -210,14 +220,14 @@ fn test_cli_parse_error_has_afdata_hint() {
         text
     );
     let json = parse_json_last_line(&text);
-    assert_eq!(json["code"], "error", "should be an error: {}", text);
+    assert_eq!(json["kind"], "error", "should be an error event: {}", text);
     assert_eq!(
-        json["error_code"], "invalid_request",
+        json["error"]["code"], "invalid_request",
         "should use standard CLI error shape: {}",
         text
     );
     assert_eq!(
-        json["retryable"], false,
+        json["error"]["retryable"], false,
         "should not be retryable: {}",
         text
     );
@@ -227,7 +237,9 @@ fn test_cli_parse_error_has_afdata_hint() {
         text
     );
     assert!(
-        json["hint"].as_str().is_some_and(|h| !h.is_empty()),
+        json["error"]["hint"]
+            .as_str()
+            .is_some_and(|h| !h.is_empty()),
         "should include hint: {}",
         text
     );
@@ -250,22 +262,25 @@ fn test_skill_install_status_uninstall_custom_dir() {
     let text = combined_text(&install);
     assert!(install.status.success(), "skill install failed: {}", text);
     let json = parse_json_last_line(&text);
+    assert!(agent_first_data::validate_protocol_event(&json, true).is_ok());
     assert_eq!(
-        json["code"], "skill_install",
+        json["result"]["code"], "skill_install",
         "bad install output: {}",
         text
     );
     assert_eq!(
-        json["installed"], true,
+        json["result"]["installed"], true,
         "install should report success: {}",
         text
     );
     assert!(
-        json["hint"].as_str().is_some_and(|h| !h.is_empty()),
+        json["result"]["hint"]
+            .as_str()
+            .is_some_and(|h| !h.is_empty()),
         "install should include operator hint: {}",
         text
     );
-    assert!(dir.path().join("hypha").join("SKILL.md").is_file());
+    assert!(dir.path().join("cmn-hypha").join("SKILL.md").is_file());
 
     let status = env.hypha(&[
         "skill",
@@ -278,14 +293,19 @@ fn test_skill_install_status_uninstall_custom_dir() {
     let text = combined_text(&status);
     assert!(status.status.success(), "skill status failed: {}", text);
     let json = parse_json_last_line(&text);
-    assert_eq!(json["code"], "skill_status", "bad status output: {}", text);
+    assert!(agent_first_data::validate_protocol_event(&json, true).is_ok());
     assert_eq!(
-        json["installed_all"], true,
+        json["result"]["code"], "skill_status",
+        "bad status output: {}",
+        text
+    );
+    assert_eq!(
+        json["result"]["installed_all"], true,
         "skill should be installed: {}",
         text
     );
     assert_eq!(
-        json["current_all"], true,
+        json["result"]["current_all"], true,
         "skill should be current: {}",
         text
     );
@@ -305,17 +325,18 @@ fn test_skill_install_status_uninstall_custom_dir() {
         text
     );
     let json = parse_json_last_line(&text);
+    assert!(agent_first_data::validate_protocol_event(&json, true).is_ok());
     assert_eq!(
-        json["code"], "skill_uninstall",
+        json["result"]["code"], "skill_uninstall",
         "bad uninstall output: {}",
         text
     );
     assert_eq!(
-        json["removed_any"], true,
+        json["result"]["removed_any"], true,
         "skill should be removed: {}",
         text
     );
-    assert!(!dir.path().join("hypha").join("SKILL.md").exists());
+    assert!(!dir.path().join("cmn-hypha").join("SKILL.md").exists());
 }
 
 #[test]

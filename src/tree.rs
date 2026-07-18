@@ -8,18 +8,30 @@ use std::path::Path;
 
 use anyhow::Result;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ignore::Match;
 use substrate::{DirReader, TreeEntry};
 
-/// Real filesystem reader with gitignore-style follow_rules support.
+/// Real filesystem reader with hierarchical gitignore-style follow_rules support.
+///
+/// `follow_rules` names ignore files (e.g. `.gitignore`) that are honored at
+/// EVERY directory level, matching git: a `.gitignore` in a subdirectory applies
+/// to that subtree, and a deeper file overrides a shallower one. The matchers are
+/// discovered by walking the tree once here, skipping `exclude_names` directories,
+/// symlinks, and any subtree already ignored by a shallower rule (so large
+/// build-artifact trees like `node_modules` are never descended into).
 pub struct FsReader {
-    gitignore: Option<Gitignore>,
+    /// One matcher per directory that holds a follow-rule file, ordered
+    /// shallowest-first so deeper rules take precedence.
+    gitignores: Vec<Gitignore>,
 }
 
 impl FsReader {
-    pub fn new(root_path: &Path, follow_rules: &[String]) -> Self {
-        Self {
-            gitignore: build_follow_rules(root_path, follow_rules),
+    pub fn new(root_path: &Path, exclude_names: &[String], follow_rules: &[String]) -> Self {
+        let mut gitignores = Vec::new();
+        if !follow_rules.is_empty() {
+            discover_follow_rules(root_path, exclude_names, follow_rules, &mut gitignores);
         }
+        Self { gitignores }
     }
 }
 
@@ -68,10 +80,7 @@ impl substrate::DirReader for FsReader {
     }
 
     fn is_ignored(&self, path: &Path, is_dir: bool) -> bool {
-        match &self.gitignore {
-            Some(gi) => gi.matched_path_or_any_parents(path, is_dir).is_ignore(),
-            None => false,
-        }
+        path_is_ignored(&self.gitignores, path, is_dir)
     }
 
     fn mtime_ms(&self, path: &Path) -> Result<Option<u64>> {
@@ -84,26 +93,69 @@ impl substrate::DirReader for FsReader {
     }
 }
 
-fn build_follow_rules(root_path: &Path, follow_rules: &[String]) -> Option<Gitignore> {
-    if follow_rules.is_empty() {
-        return None;
+/// Evaluate `path` against every ancestor directory's matcher, shallowest-first,
+/// so a deeper `.gitignore` overrides a shallower one (git semantics: the last
+/// matching rule, from the closest file, decides).
+fn path_is_ignored(gitignores: &[Gitignore], path: &Path, is_dir: bool) -> bool {
+    let mut ignored = false;
+    for gi in gitignores {
+        if path.starts_with(gi.path()) {
+            match gi.matched_path_or_any_parents(path, is_dir) {
+                Match::Ignore(_) => ignored = true,
+                Match::Whitelist(_) => ignored = false,
+                Match::None => {}
+            }
+        }
     }
+    ignored
+}
 
-    let mut builder = GitignoreBuilder::new(root_path);
-    let mut found_any = false;
-
+/// Walk `dir` (pre-order) collecting one gitignore matcher per directory that
+/// holds a follow-rule file, so the rules are honored hierarchically like git.
+/// Skips `exclude_names` directories, symlinks, and subtrees already ignored by a
+/// shallower rule — the latter means a build-artifact tree (e.g. `node_modules`,
+/// once its parent `.gitignore` is seen) is never descended into.
+fn discover_follow_rules(
+    dir: &Path,
+    exclude_names: &[String],
+    follow_rules: &[String],
+    acc: &mut Vec<Gitignore>,
+) {
+    let mut builder = GitignoreBuilder::new(dir);
+    let mut found = false;
     for rule_file in follow_rules {
-        let path = root_path.join(rule_file);
-        if path.exists() && builder.add(&path).is_none() {
-            found_any = true;
+        let path = dir.join(rule_file);
+        if path.is_file() && builder.add(&path).is_none() {
+            found = true;
+        }
+    }
+    if found {
+        if let Ok(gi) = builder.build() {
+            acc.push(gi);
         }
     }
 
-    if !found_any {
-        return None;
+    let read = match fs::read_dir(dir) {
+        Ok(read) => read,
+        Err(_) => return,
+    };
+    for entry in read.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if substrate::tree::should_exclude(&name, exclude_names) {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(file_type) = fs::symlink_metadata(&path).map(|m| m.file_type()) else {
+            continue;
+        };
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        if path_is_ignored(acc, &path, true) {
+            continue;
+        }
+        discover_follow_rules(&path, exclude_names, follow_rules, acc);
     }
-
-    builder.build().ok()
 }
 
 /// Walk a directory and produce in-memory `TreeEntry` values.
@@ -115,7 +167,7 @@ pub fn walk_dir(
     exclude_names: &[String],
     follow_rules: &[String],
 ) -> Result<Vec<TreeEntry>> {
-    let reader = FsReader::new(dir_path, follow_rules);
+    let reader = FsReader::new(dir_path, exclude_names, follow_rules);
     substrate::walk_dir(&reader, dir_path, exclude_names)
 }
 
@@ -134,7 +186,7 @@ pub fn check_no_symlinks(
     exclude_names: &[String],
     follow_rules: &[String],
 ) -> Result<()> {
-    let reader = FsReader::new(dir_path, follow_rules);
+    let reader = FsReader::new(dir_path, exclude_names, follow_rules);
     check_no_symlinks_inner(&reader, dir_path, dir_path, exclude_names)
 }
 
@@ -245,5 +297,84 @@ mod tests {
 
         // Excluding the symlink by name should not error
         assert!(check_no_symlinks(root, &["linked.txt".to_string()], &[]).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn check_no_symlinks_honors_nested_gitignore() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        // A per-language subdir whose own .gitignore excludes node_modules — the
+        // exact shape that broke afdata packaging (typescript/.gitignore holds
+        // `node_modules/`, and node_modules/.bin/tsx is a symlink).
+        let sub = root.join("typescript");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join(".gitignore"), "node_modules/\n").unwrap();
+        let bin = sub.join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("target"), "x").unwrap();
+        symlink("target", bin.join("tsx")).unwrap();
+
+        // follow_rules=[".gitignore"] must honor the nested file, so the ignored
+        // node_modules is never descended and its symlink never flagged.
+        assert!(check_no_symlinks(root, &[], &[".gitignore".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn walk_dir_honors_nested_gitignore() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let sub = root.join("pkg");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join(".gitignore"), "build/\n").unwrap();
+        std::fs::write(sub.join("keep.txt"), "keep").unwrap();
+        std::fs::create_dir(sub.join("build")).unwrap();
+        std::fs::write(sub.join("build").join("out.o"), "obj").unwrap();
+
+        let entries = walk_dir(root, &[], &[".gitignore".to_string()]).unwrap();
+        let names: Vec<String> = substrate::flatten_entries(&entries)
+            .into_iter()
+            .map(|(path, _, _)| path)
+            .collect();
+
+        assert!(
+            names.iter().any(|n| n.ends_with("keep.txt")),
+            "tracked sibling must survive: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.contains("build")),
+            "nested-gitignored dir must be excluded: {names:?}"
+        );
+    }
+
+    #[test]
+    fn deeper_gitignore_overrides_shallower() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        // Root ignores *.log; a subdirectory whitelists them back — a deeper
+        // rule must override the shallower one, like git.
+        std::fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        let sub = root.join("keep");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join(".gitignore"), "!*.log\n").unwrap();
+        std::fs::write(root.join("root.log"), "r").unwrap();
+        std::fs::write(sub.join("kept.log"), "k").unwrap();
+
+        let entries = walk_dir(root, &[], &[".gitignore".to_string()]).unwrap();
+        let names: Vec<String> = substrate::flatten_entries(&entries)
+            .into_iter()
+            .map(|(path, _, _)| path)
+            .collect();
+
+        assert!(
+            !names.iter().any(|n| n.ends_with("root.log")),
+            "root-level *.log stays ignored: {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n.ends_with("kept.log")),
+            "deeper !*.log re-includes it: {names:?}"
+        );
     }
 }

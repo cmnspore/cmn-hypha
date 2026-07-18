@@ -19,8 +19,8 @@ fn test_mycelium_root() {
     // Verify JSON output
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("\"code\""),
-        "should output JSON code: {}",
+        stdout.contains("\"kind\":\"result\""),
+        "should output a JSON result event: {}",
         stdout
     );
     assert!(
@@ -84,8 +84,8 @@ fn test_mycelium_status_json() {
         stdout
     );
     assert!(
-        stdout.contains("\"code\""),
-        "JSON output should have code: {}",
+        stdout.contains("\"kind\":\"result\""),
+        "JSON output should be a result event: {}",
         stdout
     );
     assert!(
@@ -137,7 +137,7 @@ fn test_spore_hatch() {
     // Verify JSON output (default)
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("\"code\""),
+        stdout.contains("\"kind\":\"result\""),
         "should output JSON: {}",
         stdout
     );
@@ -260,7 +260,9 @@ fn test_release_hash_roundtrip() {
     let release_json: serde_json::Value = stdout
         .lines()
         .filter_map(|l| serde_json::from_str(l).ok())
-        .find(|v: &serde_json::Value| v.get("code").and_then(|c| c.as_str()) == Some("ok"))
+        .find(|v: &serde_json::Value| {
+            v.get("kind").and_then(|kind| kind.as_str()) == Some("result")
+        })
         .expect("no ok response from release");
     let hash = release_json["result"]["hash"]
         .as_str()
@@ -533,7 +535,7 @@ fn test_manual_spore_core_json() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("\"code\":\"ok\""),
+        stdout.contains("\"kind\":\"result\""),
         "should succeed: {}",
         stdout
     );

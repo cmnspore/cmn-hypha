@@ -17,7 +17,7 @@ pub use run::execute;
 #[command(disable_help_subcommand = true)]
 #[command(after_long_help = concat!(
     "All output follows Agent-First Data format:\n",
-    "  {\"code\": \"ok\", \"result\": {...}, \"trace\": {...}}\n",
+    "  {\"kind\": \"result\", \"result\": {...}, \"trace\": {...}}\n",
     "\n",
     "Quick start (try with cmn.dev):\n",
     "  hypha sense cmn://cmn.dev\n",
@@ -39,6 +39,14 @@ pub struct Cli {
     /// Log categories (comma-separated): startup, request, ...
     #[arg(long, value_delimiter = ',', global = true)]
     pub log: Vec<String>,
+
+    /// Redirect stdout to this file
+    #[arg(long, value_name = "PATH", global = true)]
+    pub stdout_file: Option<std::path::PathBuf>,
+
+    /// Redirect stderr to this file
+    #[arg(long, value_name = "PATH", global = true)]
+    pub stderr_file: Option<std::path::PathBuf>,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -235,8 +243,8 @@ Examples:
   hypha hatch --license MIT --domain cmn.dev
 
 Subcommands:
-  hypha hatch bond set/remove/clear   Manage bonds in spore.core.json
-  hypha hatch tree set/show            Manage tree configuration")]
+  hypha hatch bond set/remove/clear/sync   Manage bonds in spore.core.json
+  hypha hatch tree set/show                Manage tree configuration")]
     #[command(args_conflicts_with_subcommands = true)]
     Hatch {
         /// Opaque identifier stored in spore.core.json
@@ -518,7 +526,9 @@ Examples:
   hypha hatch bond set --uri cmn://cmn.dev/b3.abc --relation follows --id my-lib --reason \"Core library\"
   hypha hatch bond set --uri cmn://cmn.dev/b3.abc --with 'mints=[\"https://mint.example.com\"]'
   hypha hatch bond remove --relation follows
-  hypha hatch bond clear")]
+  hypha hatch bond clear
+  hypha hatch bond sync --relation follows --spec ./follows.json --domain cmn.dev
+  hypha hatch bond sync --relation follows --spec - --check")]
     Bond {
         #[command(subcommand)]
         #[serde(flatten)]
@@ -564,6 +574,54 @@ pub enum HatchBondCommands {
     },
     /// Remove all bonds
     Clear,
+    /// Reconcile a relation's bonds to exactly match a declarative spec (idempotent)
+    #[command(after_long_help = "\
+Spec format: a JSON array of {id, reason?, with?, uri?} objects (or \"-\" for stdin):
+  [
+    {\"id\": \"my-lib\", \"reason\": \"Core library\", \"uri\": \"cmn://cmn.dev/b3.abc\"},
+    {\"id\": \"other-lib\", \"reason\": \"Also used\", \"with\": {\"pinned\": true}}
+  ]
+
+Entries that omit \"uri\" are resolved internally: deployed mycelium inventory
+first, `release --dry-run` fallback for not-yet-deployed siblings (requires
+--domain; --site-path for a non-default site). An explicit \"uri\" skips
+resolution entirely. Resolution reads live deploy state, so sync is only
+idempotent relative to a fixed deploy point: run `release` for all siblings
+before `sync`, not interleaved with it.
+
+After a successful run, this relation's bonds exactly equal the spec, in spec
+order; every other relation is left untouched. `with` is replaced wholesale
+per entry (not merged) — same as `hatch bond set`.
+
+`--check` computes the add/update/remove diff without writing anything. If
+there is any drift it exits 7 (distinct from the normal error exit 1) so CI
+or a release pipeline can gate on it; with no drift it exits 0.
+
+Reading bonds is a job for afdata (`value`/`get`/`paths` on spore.core.json),
+not hypha — hatch is write-only, there is no `bond show`.
+
+Examples:
+  hypha hatch bond sync --relation follows --spec ./follows.json --domain cmn.dev
+  hypha hatch bond sync --relation follows --spec - --domain cmn.dev --site-path ./deploy/cmn.dev
+  hypha hatch bond sync --relation follows --spec ./follows.json --check
+  hypha hatch bond sync --relation depends_on --spec '[]'   # clears the relation")]
+    Sync {
+        /// Bond relation to reconcile; every other relation is left untouched
+        #[arg(long)]
+        relation: substrate::BondRelation,
+        /// Path to a JSON spec file, or "-" to read the spec from stdin
+        #[arg(long)]
+        spec: String,
+        /// Domain used to resolve spec entries that omit "uri" (deployed inventory + dry-run fallback)
+        #[arg(long)]
+        domain: Option<String>,
+        /// Custom site directory used for resolution (default: ~/.cmn/mycelium/<domain>)
+        #[arg(long)]
+        site_path: Option<String>,
+        /// Compute the diff without writing; exit 7 (distinct from the error exit) if there is drift
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Subcommand, Serialize)]
@@ -676,6 +734,20 @@ Examples:
         #[serde(flatten)]
         command: NutrientCommands,
     },
+    /// Manage published spores in the inventory (yank/unyank)
+    #[command(after_long_help = "\
+Adding a spore is not here — that happens as a side effect of `hypha release`.
+These manage the post-publish lifecycle of a spore already in the inventory.
+
+Examples:
+  hypha mycelium spore yank --id afconfig --site-path deploy/cmn.dev
+  hypha mycelium spore yank --id afconfig --purge
+  hypha mycelium spore unyank --id afconfig --site-path deploy/cmn.dev")]
+    Spore {
+        #[command(subcommand)]
+        #[serde(flatten)]
+        command: SporeCommands,
+    },
     /// Send a pulse to a synapse indexer
     #[command(after_long_help = "\
 Examples:
@@ -727,6 +799,58 @@ pub enum NutrientCommands {
         /// Domain name
         domain: String,
         /// Custom site directory
+        #[arg(long)]
+        site_path: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SporeCommands {
+    /// Yank a spore from the inventory (delist; keeps published bytes)
+    #[command(after_long_help = "\
+Removes the spore's entry from the domain's mycelium listing and re-signs the
+mycelium + cmn.json. Only the mycelium capsule changes — every other spore
+capsule is untouched, so this is far cheaper than `release --clean-published`.
+
+The domain is inferred from the site's cmn.json; pass --site-path (or --domain
+to pick among multiple ~/.cmn sites). By default the spore's manifest and
+archive stay published so existing `cmn://<domain>/<hash>` references keep
+resolving (crates.io `yank` semantics); --purge also deletes those files.
+
+Examples:
+  hypha mycelium spore yank --id afconfig --site-path deploy/cmn.dev
+  hypha mycelium spore yank --id afconfig --purge")]
+    Yank {
+        /// Spore id to yank from the inventory
+        #[arg(long)]
+        id: String,
+        /// Domain (default: inferred from the site; only needed to disambiguate ~/.cmn sites)
+        #[arg(long)]
+        domain: Option<String>,
+        /// Custom site directory (default: ~/.cmn/mycelium/<domain>)
+        #[arg(long)]
+        site_path: Option<String>,
+        /// Also delete the spore's published manifest + archive files
+        #[arg(long)]
+        purge: bool,
+    },
+    /// Unyank a previously yanked spore (re-add from its kept manifest)
+    #[command(after_long_help = "\
+Re-adds a yanked spore to the inventory using its still-published manifest, then
+re-signs. Fails if the manifest was purged (run `hypha release` instead) or the
+id is already listed.
+
+Examples:
+  hypha mycelium spore unyank --id afconfig --site-path deploy/cmn.dev")]
+    Unyank {
+        /// Spore id to restore to the inventory
+        #[arg(long)]
+        id: String,
+        /// Domain (default: inferred from the site; only needed to disambiguate ~/.cmn sites)
+        #[arg(long)]
+        domain: Option<String>,
+        /// Custom site directory (default: ~/.cmn/mycelium/<domain>)
         #[arg(long)]
         site_path: Option<String>,
     },
@@ -889,29 +1013,56 @@ Examples:
     },
 }
 
+/// Render a value as a redacted single-line JSON CLI message.
+pub(crate) fn render_cli_json(value: &serde_json::Value) -> String {
+    agent_first_data::render(
+        value,
+        agent_first_data::OutputFormat::Json,
+        &agent_first_data::OutputOptions::default(),
+    )
+}
+
 /// Build hypha's CLI argument-error envelope.
 ///
-/// Keeps a stable machine-readable shape for argument/parse failures
-/// (`error_code`, `retryable`) on top of the agent-first-data error builder,
-/// which no longer emits those fields itself.
+/// Build a protocol-v1 error event for argument/parse failures.
 pub(crate) fn cli_error_value(message: &str, hint: &str) -> serde_json::Value {
-    let mut value = agent_first_data::build_json_error(
-        message,
-        Some(hint),
-        Some(serde_json::json!({ "duration_ms": 0 })),
-    );
-    if let serde_json::Value::Object(map) = &mut value {
-        map.insert(
-            "error_code".to_string(),
-            serde_json::Value::String("invalid_request".to_string()),
-        );
-        map.insert("retryable".to_string(), serde_json::Value::Bool(false));
+    match agent_first_data::json_error("invalid_request", message)
+        .hint(hint)
+        .trace(serde_json::json!({ "duration_ms": 0 }))
+        .build()
+    {
+        Ok(event) => event.into_value(),
+        Err(err) => serde_json::json!({
+            "kind": "error",
+            "error": {
+                "code": "internal_error",
+                "message": err.to_string(),
+                "retryable": false,
+            },
+            "trace": {},
+        }),
     }
-    value
 }
 
 pub fn parse_or_exit() -> Cli {
     let raw: Vec<String> = std::env::args().collect();
+
+    match agent_first_data::cli_handle_version_or_continue(&raw, "hypha", env!("CARGO_PKG_VERSION"))
+    {
+        Ok(Some(version)) => {
+            let mut stdout = std::io::stdout();
+            let _ = std::io::Write::write_all(&mut stdout, version.as_bytes());
+            std::process::exit(0);
+        }
+        Ok(None) => {}
+        Err(err) => {
+            let mut stdout = std::io::stdout();
+            let message = render_cli_json(err.as_value());
+            let _ = std::io::Write::write_all(&mut stdout, message.as_bytes());
+            let _ = std::io::Write::write_all(&mut stdout, b"\n");
+            std::process::exit(2);
+        }
+    }
 
     match agent_first_data::cli_handle_help_or_continue(
         &raw,
@@ -926,7 +1077,7 @@ pub fn parse_or_exit() -> Cli {
         Ok(None) => {}
         Err(err) => {
             let mut stdout = std::io::stdout();
-            let message = agent_first_data::output_json(&err);
+            let message = render_cli_json(&err);
             let _ = std::io::Write::write_all(&mut stdout, message.as_bytes());
             let _ = std::io::Write::write_all(&mut stdout, b"\n");
             std::process::exit(2);
@@ -934,24 +1085,17 @@ pub fn parse_or_exit() -> Cli {
     }
 
     Cli::try_parse().unwrap_or_else(|e| {
-        if matches!(e.kind(), clap::error::ErrorKind::DisplayVersion) {
-            let mut stdout = std::io::stdout();
-            let message = agent_first_data::output_json(&agent_first_data::build_json_ok(
-                serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }),
-                None,
-            ));
-            let _ = std::io::Write::write_all(&mut stdout, message.as_bytes());
-            let _ = std::io::Write::write_all(&mut stdout, b"\n");
-            std::process::exit(0);
-        }
-        if matches!(e.kind(), clap::error::ErrorKind::DisplayHelp) {
+        if matches!(
+            e.kind(),
+            clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+        ) {
             let mut stdout = std::io::stdout();
             let _ = std::io::Write::write_all(&mut stdout, e.to_string().as_bytes());
             std::process::exit(0);
         }
 
         let mut stdout = std::io::stdout();
-        let message = agent_first_data::output_json(&cli_error_value(
+        let message = render_cli_json(&cli_error_value(
             &e.to_string(),
             "run hypha --help to inspect all commands and flags",
         ));

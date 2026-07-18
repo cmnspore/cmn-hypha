@@ -1,8 +1,8 @@
 # Hypha
 
-**The Local Site Manager for the Code Mycelial Network (CMN)**
+The reference CMN client CLI — release spores, query synapses, resolve bonds, and manage your local mycelium.
 
-Hypha is a CLI tool for managing your CMN site locally. It handles identity (Ed25519 keypairs), spore creation, signing, and spore consumption (taste, spawn, grow, absorb).
+Hypha is the local site manager for the Code Mycelial Network. It handles identity (Ed25519 keypairs), spore creation, signing, and spore consumption (taste, spawn, grow, absorb).
 
 > **Full Reference**: See [docs/cli.md](docs/cli.md) for the generated CLI reference.
 
@@ -156,11 +156,11 @@ Default is JSON (for AI agents). Hypha writes a stdout JSONL event stream (start
 ```bash
 # JSON (default)
 hypha mycelium status cmn.dev
-# {"code":"ok","result":{...}}
+# {"kind":"result","result":{...},"trace":{...}}
 
 # Plain (same data, rendered as logfmt key-value pairs)
 hypha -o plain mycelium status cmn.dev
-# code=ok result.domain=cmn.dev result.public_key=ed25519.5XmkQ9vZP8nL3xJdFtR7wNcA6sY2bKgU1eH9pXb4 result.site_path=/home/user/.cmn/mycelium/cmn.dev result.spore_count=5
+# kind=result result.domain=cmn.dev result.public_key=ed25519.5XmkQ9vZP8nL3xJdFtR7wNcA6sY2bKgU1eH9pXb4 result.site_path=/home/user/.cmn/mycelium/cmn.dev result.spore_count=5
 ```
 
 ## Development
@@ -183,16 +183,16 @@ rm -rf /tmp/cmn-test && unset CMN_HOME
 
 ## Documentation
 
-Regenerate the CLI reference with the generator script (it prepends the
+Regenerate the CLI reference with the project entrypoint (it prepends the
 `docs/cli.md` header, then appends `hypha --help --recursive --output markdown`):
 
 ```bash
-scripts/projects/cmn-hypha/generate-cli-doc.sh            # from the repo root
-scripts/projects/cmn-hypha/generate-cli-doc.sh --dry-run  # CI check: fails if stale
+scripts/projects.sh docs cmn-hypha
+scripts/projects.sh docs cmn-hypha --dry-run
 ```
 
 > Running the bare `hypha --help --recursive --output markdown` only prints the
-> body — use the script so the header stays in sync and the `--dry-run` check passes.
+> body — use the project entrypoint so the header stays in sync.
 
 | Document | Description |
 |----------|-------------|

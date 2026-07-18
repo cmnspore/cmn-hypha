@@ -1,10 +1,11 @@
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::api::Output;
 use crate::auth;
 use crate::site::{self, SiteDir};
+use crate::HyphaError;
 use substrate::{
     BondRelation, PrettyJson, Spore, SporeBond, SporeCapsule, SporeCore, SPORE_CORE_SCHEMA,
     SPORE_SCHEMA,
@@ -50,157 +51,130 @@ pub struct ReleaseArgs<'a> {
     pub dry_run: bool,
 }
 
-pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
-    let ReleaseArgs {
-        domain,
-        source,
-        site_path,
-        dist_git,
-        dist_ref,
-        archive,
-        dry_run,
-    } = args;
-    let now_epoch_ms = crate::time::now_epoch_ms();
+/// Everything needed to finish a release, computed without writing any files.
+///
+/// This is exactly the work `release --dry-run` does (schema validation,
+/// domain/key match, tree hashing, signing, URI computation) — factored out so
+/// other internal callers (e.g. `hatch bond sync`'s URI resolution) can reuse
+/// the identical computation instead of forking a `hypha release --dry-run`
+/// subprocess.
+pub(crate) struct ReleasePlan {
+    pub site: SiteDir,
+    pub spawned_from_spore_path: PathBuf,
+    pub draft: SporeCore,
+    pub entries: Vec<substrate::TreeEntry>,
+    pub core: SporeCore,
+    pub core_signature: String,
+    pub uri_hash: String,
+    pub uri: String,
+}
 
+/// Compute a [`ReleasePlan`] for `working_dir` as if releasing to `domain` right
+/// now — the pure, read-only subset of `handle_release` shared by the real
+/// release path and the `--dry-run` / internal-resolution paths.
+pub(crate) fn build_release_plan(
+    domain: &str,
+    site_path: Option<&str>,
+    working_dir: PathBuf,
+    now_epoch_ms: u64,
+) -> Result<ReleasePlan, HyphaError> {
     if site_path.is_none() {
-        if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error_hypha(&e);
-        }
-    }
-
-    // Parse archive format
-    let archive_format = match ArchiveFormat::from_str(archive) {
-        Ok(f) => f,
-        Err(e) => return out.error_hypha(&e),
-    };
-
-    // Validate distribution options
-    if dist_git.is_some() && dist_ref.is_none() {
-        return out.error("invalid_args", "--dist-git requires --dist-ref");
-    }
-
-    if dist_git.is_none() && dist_ref.is_some() {
-        return out.error("invalid_args", "--dist-ref requires --dist-git");
+        site::validate_site_domain_path(domain)?;
     }
 
     let site = SiteDir::from_args(domain, site_path);
     if !site.exists() {
-        return out.error_hint(
+        return Err(HyphaError::with_hint(
             "NO_SITE",
-            &format!("Site not found at {}", site.root.display()),
-            Some(&format!("run: hypha mycelium root --domain {}", domain)),
-        );
+            format!("Site not found at {}", site.root.display()),
+            format!("run: hypha mycelium root --domain {}", domain),
+        ));
     }
-
-    let working_dir = match source
-        .map(std::path::PathBuf::from)
-        .map(Ok)
-        .unwrap_or_else(std::env::current_dir)
-    {
-        Ok(d) => d,
-        Err(e) => {
-            return out.error(
-                "dir_error",
-                &format!("Failed to get working directory: {}", e),
-            );
-        }
-    };
 
     let spore_core_path = working_dir.join("spore.core.json");
 
     if !spore_core_path.exists() {
-        return out.error_hint(
+        return Err(HyphaError::with_hint(
             "NO_SPORE",
-            &format!("No spore.core.json found at {}", working_dir.display()),
-            Some("run: hypha hatch"),
-        );
+            format!("No spore.core.json found at {}", working_dir.display()),
+            "run: hypha hatch",
+        ));
     }
 
-    let draft_content = match std::fs::read_to_string(&spore_core_path) {
-        Ok(c) => c,
-        Err(e) => {
-            return out.error(
-                "read_error",
-                &format!("Failed to read spore.core.json: {}", e),
-            );
-        }
-    };
+    let draft_content = std::fs::read_to_string(&spore_core_path).map_err(|e| {
+        HyphaError::new(
+            "read_error",
+            format!("Failed to read spore.core.json: {}", e),
+        )
+    })?;
 
-    let draft_value: serde_json::Value = match serde_json::from_str(&draft_content) {
-        Ok(v) => v,
-        Err(e) => return out.error("parse_error", &format!("Invalid spore.core.json: {}", e)),
-    };
-    let schema_type = match substrate::validate_schema(&draft_value) {
-        Ok(t) => t,
-        Err(e) => {
-            return out.error(
-                "schema_error",
-                &format!("spore.core.json schema validation failed: {}", e),
-            );
-        }
-    };
-    if schema_type != substrate::SchemaType::SporeCore {
-        return out.error(
+    let draft_value: serde_json::Value = serde_json::from_str(&draft_content)
+        .map_err(|e| HyphaError::new("parse_error", format!("Invalid spore.core.json: {}", e)))?;
+    let schema_type = substrate::validate_schema(&draft_value).map_err(|e| {
+        HyphaError::new(
             "schema_error",
-            &format!("spore.core.json must use {}", SPORE_CORE_SCHEMA),
-        );
+            format!("spore.core.json schema validation failed: {}", e),
+        )
+    })?;
+    if schema_type != substrate::SchemaType::SporeCore {
+        return Err(HyphaError::new(
+            "schema_error",
+            format!("spore.core.json must use {}", SPORE_CORE_SCHEMA),
+        ));
     }
     // Reject runtime-only fields that must not appear in spore.core.json
     if draft_value.get("updated_at_epoch_ms").is_some() {
-        return out.error_hint(
+        return Err(HyphaError::with_hint(
             "INVALID_FIELD",
             "spore.core.json must not contain updated_at_epoch_ms (computed at release time)",
-            Some("run: hypha hatch   (hatch removes this field automatically)"),
-        );
+            "run: hypha hatch   (hatch removes this field automatically)",
+        ));
     }
 
-    let draft: SporeCore = match serde_json::from_value(draft_value) {
-        Ok(d) => d,
-        Err(e) => return out.error("parse_error", &format!("Invalid spore.core.json: {}", e)),
-    };
+    let draft: SporeCore = serde_json::from_value(draft_value)
+        .map_err(|e| HyphaError::new("parse_error", format!("Invalid spore.core.json: {}", e)))?;
 
     // Validate domain in spore.core.json matches --domain
     if draft.domain.is_empty() {
-        return out.error_hint(
+        return Err(HyphaError::with_hint(
             "DOMAIN_EMPTY",
             "spore.core.json domain is empty",
-            Some(&format!("run: hypha hatch --domain {}", domain)),
-        );
+            format!("run: hypha hatch --domain {}", domain),
+        ));
     }
     if draft.domain != domain {
-        return out.error_hint(
+        return Err(HyphaError::with_hint(
             "DOMAIN_MISMATCH",
-            &format!(
+            format!(
                 "spore.core.json domain '{}' does not match --domain '{}'",
                 draft.domain, domain
             ),
-            Some(&format!("run: hypha hatch --domain {}", domain)),
-        );
+            format!("run: hypha hatch --domain {}", domain),
+        ));
     }
 
     // Get public key from site identity
-    let public_key = match auth::get_identity_with_site(domain, &site) {
-        Ok(info) => info.public_key,
-        Err(e) => return out.error_from("identity_error", &e),
-    };
+    let public_key = auth::get_identity_with_site(domain, &site)
+        .map_err(|e| HyphaError::new("identity_error", e.to_string()))?
+        .public_key;
 
     // Validate key in spore.core.json matches domain identity
     if draft.key.is_empty() {
-        return out.error_hint(
+        return Err(HyphaError::with_hint(
             "KEY_EMPTY",
             "spore.core.json key is empty",
-            Some(&format!("run: hypha hatch --domain {}", domain)),
-        );
+            format!("run: hypha hatch --domain {}", domain),
+        ));
     }
     if draft.key != public_key {
-        return out.error_hint(
+        return Err(HyphaError::with_hint(
             "KEY_MISMATCH",
-            &format!(
+            format!(
                 "Key in spore.core.json does not match domain '{}' (key may have rotated)",
                 domain
             ),
-            Some(&format!("run: hypha hatch --domain {}", domain)),
-        );
+            format!("run: hypha hatch --domain {}", domain),
+        ));
     }
 
     // Build bonds: start from spore.core.json (schema guarantees no spawned_from),
@@ -221,25 +195,22 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
     }
 
     // 1. Check for symlinks (not supported in spore content), then walk tree
-    if let Err(e) = crate::tree::check_no_symlinks(
+    crate::tree::check_no_symlinks(
         &working_dir,
         &draft.tree.exclude_names,
         &draft.tree.follow_rules,
-    ) {
-        return out.error("SYMLINK_ERR", &format!("{}", e));
-    }
-    let entries = match crate::tree::walk_dir(
+    )
+    .map_err(|e| HyphaError::new("SYMLINK_ERR", format!("{}", e)))?;
+    let entries = crate::tree::walk_dir(
         &working_dir,
         &draft.tree.exclude_names,
         &draft.tree.follow_rules,
-    ) {
-        Ok(e) => e,
-        Err(e) => return out.error("HASH_ERR", &format!("Failed to walk directory: {}", e)),
-    };
-    let (tree_hash, size_bytes) = match draft.tree.compute_hash_and_size(&entries) {
-        Ok(v) => v,
-        Err(e) => return out.error("HASH_ERR", &format!("Failed to compute tree hash: {}", e)),
-    };
+    )
+    .map_err(|e| HyphaError::new("HASH_ERR", format!("Failed to walk directory: {}", e)))?;
+    let (tree_hash, size_bytes) = draft
+        .tree
+        .compute_hash_and_size(&entries)
+        .map_err(|e| HyphaError::new("HASH_ERR", format!("Failed to compute tree hash: {}", e)))?;
 
     let core = SporeCore {
         id: draft.id.clone(),
@@ -265,14 +236,13 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
     };
 
     // 2. Sign core → core_signature
-    let core_signature = match auth::sign_json_with_site(&site, &core) {
-        Ok(sig) => sig,
-        Err(auth::JsonSignError::Jcs(message)) => return out.error("jcs_error", &message),
-        Err(auth::JsonSignError::Sign(err)) => return out.error_from("sign_error", &err),
-    };
+    let core_signature = auth::sign_json_with_site(&site, &core).map_err(|e| match e {
+        auth::JsonSignError::Jcs(message) => HyphaError::new("jcs_error", message),
+        auth::JsonSignError::Sign(err) => HyphaError::new("sign_error", err.to_string()),
+    })?;
 
     // 3. Compute URI hash from tree_hash + core + core_signature
-    let uri_hash = match (substrate::Spore {
+    let uri_hash = (substrate::Spore {
         schema: substrate::SPORE_SCHEMA.to_string(),
         capsule: substrate::SporeCapsule {
             uri: String::new(),
@@ -283,14 +253,79 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
         capsule_signature: String::new(),
     })
     .computed_uri_hash_from_tree_hash(&tree_hash)
-    {
-        Ok(hash) => hash,
-        Err(e) => return out.error("jcs_error", &e.to_string()),
-    };
-    let filename = uri_hash.clone();
+    .map_err(|e| HyphaError::new("jcs_error", e.to_string()))?;
 
     // 4. Build URI
     let uri = format!("cmn://{}/{}", domain, uri_hash);
+
+    Ok(ReleasePlan {
+        site,
+        spawned_from_spore_path,
+        draft,
+        entries,
+        core,
+        core_signature,
+        uri_hash,
+        uri,
+    })
+}
+
+pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
+    let ReleaseArgs {
+        domain,
+        source,
+        site_path,
+        dist_git,
+        dist_ref,
+        archive,
+        dry_run,
+    } = args;
+    let now_epoch_ms = crate::time::now_epoch_ms();
+
+    // Parse archive format
+    let archive_format = match ArchiveFormat::from_str(archive) {
+        Ok(f) => f,
+        Err(e) => return out.error_hypha(&e),
+    };
+
+    // Validate distribution options
+    if dist_git.is_some() && dist_ref.is_none() {
+        return out.error("invalid_args", "--dist-git requires --dist-ref");
+    }
+
+    if dist_git.is_none() && dist_ref.is_some() {
+        return out.error("invalid_args", "--dist-ref requires --dist-git");
+    }
+
+    let working_dir = match source
+        .map(std::path::PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)
+    {
+        Ok(d) => d,
+        Err(e) => {
+            return out.error(
+                "dir_error",
+                &format!("Failed to get working directory: {}", e),
+            );
+        }
+    };
+
+    let plan = match build_release_plan(domain, site_path, working_dir, now_epoch_ms) {
+        Ok(p) => p,
+        Err(e) => return out.error_hypha(&e),
+    };
+    let ReleasePlan {
+        site,
+        spawned_from_spore_path,
+        draft,
+        entries,
+        core,
+        core_signature,
+        uri_hash,
+        uri,
+    } = plan;
+    let filename = uri_hash.clone();
 
     // Dry run: return URI without writing anything
     if dry_run {

@@ -1,14 +1,10 @@
-<!-- Generated. Do not edit by hand. -->
+<!-- Generated. Do not edit by hand. Regenerate: hypha --help --recursive --output markdown -->
 
 # Hypha CLI Reference
-
-> Regenerate with `hypha --help --recursive --output markdown`.
 
 # hypha - CMN Client - A bio-digital extension for Visitors to release and absorb Spores
 
 ```text
-CMN Client - A bio-digital extension for Visitors to release and absorb Spores
-
 Usage: hypha [OPTIONS] <COMMAND>
 
 Commands:
@@ -38,6 +34,12 @@ Options:
       --log <LOG>
           Log categories (comma-separated): startup, request, ...
 
+      --stdout-file <PATH>
+          Redirect stdout to this file
+
+      --stderr-file <PATH>
+          Redirect stderr to this file
+
   -h, --help
           Print help. Add --recursive to expand every nested subcommand; add --output json|yaml|markdown to render this help in another format.
 
@@ -45,7 +47,7 @@ Options:
           Print version
 
 All output follows Agent-First Data format:
-  {"code": "ok", "result": {...}, "trace": {...}}
+  {"kind": "result", "result": {...}, "trace": {...}}
 
 Quick start (try with cmn.dev):
   hypha sense cmn://cmn.dev
@@ -63,8 +65,6 @@ More help:
 ## hypha sense - Resolve a CMN URI and show metadata without downloading
 
 ```text
-Resolve a CMN URI and show metadata without downloading
-
 Usage: sense [OPTIONS] <URI>
 
 Arguments:
@@ -93,8 +93,6 @@ Examples:
 ## hypha taste - Evaluate spore: download for review, or record a verdict
 
 ```text
-Evaluate spore: download for review, or record a verdict
-
 Usage: taste [OPTIONS] <URI>
 
 Arguments:
@@ -132,8 +130,6 @@ Examples:
 ## hypha spawn - Create a working copy of a spore (auto-detects best distribution format)
 
 ```text
-Create a working copy of a spore (auto-detects best distribution format)
-
 Usage: spawn [OPTIONS] <URI> [DIRECTORY]
 
 Arguments:
@@ -173,8 +169,6 @@ Examples:
 ## hypha grow - Pull latest changes from spawn source via Synapse lineage
 
 ```text
-Pull latest changes from spawn source via Synapse lineage
-
 Usage: grow [OPTIONS]
 
 Options:
@@ -212,8 +206,6 @@ Examples:
 ## hypha absorb - Prepare spores for AI-assisted merge
 
 ```text
-Prepare spores for AI-assisted merge
-
 Usage: absorb [OPTIONS] [URIS]...
 
 Arguments:
@@ -250,8 +242,6 @@ Examples:
 ## hypha bond - Fetch all bonds from spore.core.json to .cmn/bonds/
 
 ```text
-Fetch all bonds from spore.core.json to .cmn/bonds/
-
 Usage: bond [OPTIONS]
 
 Options:
@@ -273,8 +263,6 @@ Examples:
 ## hypha replicate - Copy a spore to your domain (same hash, re-signed capsule)
 
 ```text
-Copy a spore to your domain (same hash, re-signed capsule)
-
 Usage: replicate [OPTIONS] --domain <DOMAIN> [URIS]...
 
 Arguments:
@@ -305,8 +293,6 @@ Examples:
 ## hypha hatch - Create or update spore.core.json in working directory
 
 ```text
-Create or update spore.core.json in working directory
-
 Usage: hatch [OPTIONS]
        hatch <COMMAND>
 
@@ -349,21 +335,20 @@ Examples:
   hypha hatch --license MIT --domain cmn.dev
 
 Subcommands:
-  hypha hatch bond set/remove/clear   Manage bonds in spore.core.json
-  hypha hatch tree set/show            Manage tree configuration
+  hypha hatch bond set/remove/clear/sync   Manage bonds in spore.core.json
+  hypha hatch tree set/show                Manage tree configuration
 ```
 
 ### hypha hatch bond - Manage bonds in spore.core.json
 
 ```text
-Manage bonds in spore.core.json
-
 Usage: bond <COMMAND>
 
 Commands:
   set     Add or update a bond (upsert by URI)
   remove  Remove bonds by URI and/or relation
   clear   Remove all bonds
+  sync    Reconcile a relation's bonds to exactly match a declarative spec (idempotent)
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -375,13 +360,13 @@ Examples:
   hypha hatch bond set --uri cmn://cmn.dev/b3.abc --with 'mints=["https://mint.example.com"]'
   hypha hatch bond remove --relation follows
   hypha hatch bond clear
+  hypha hatch bond sync --relation follows --spec ./follows.json --domain cmn.dev
+  hypha hatch bond sync --relation follows --spec - --check
 ```
 
 #### hypha hatch bond set - Add or update a bond (upsert by URI)
 
 ```text
-Add or update a bond (upsert by URI)
-
 Usage: set [OPTIONS] --uri <URI>
 
 Options:
@@ -407,8 +392,6 @@ Options:
 #### hypha hatch bond remove - Remove bonds by URI and/or relation
 
 ```text
-Remove bonds by URI and/or relation
-
 Usage: remove [OPTIONS]
 
 Options:
@@ -425,8 +408,6 @@ Options:
 #### hypha hatch bond clear - Remove all bonds
 
 ```text
-Remove all bonds
-
 Usage: clear
 
 Options:
@@ -434,11 +415,64 @@ Options:
           Print help
 ```
 
+#### hypha hatch bond sync - Reconcile a relation's bonds to exactly match a declarative spec (idempotent)
+
+```text
+Usage: sync [OPTIONS] --relation <RELATION> --spec <SPEC>
+
+Options:
+      --relation <RELATION>
+          Bond relation to reconcile; every other relation is left untouched
+
+      --spec <SPEC>
+          Path to a JSON spec file, or "-" to read the spec from stdin
+
+      --domain <DOMAIN>
+          Domain used to resolve spec entries that omit "uri" (deployed inventory + dry-run fallback)
+
+      --site-path <SITE_PATH>
+          Custom site directory used for resolution (default: ~/.cmn/mycelium/<domain>)
+
+      --check
+          Compute the diff without writing; exit 7 (distinct from the error exit) if there is drift
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Spec format: a JSON array of {id, reason?, with?, uri?} objects (or "-" for stdin):
+  [
+    {"id": "my-lib", "reason": "Core library", "uri": "cmn://cmn.dev/b3.abc"},
+    {"id": "other-lib", "reason": "Also used", "with": {"pinned": true}}
+  ]
+
+Entries that omit "uri" are resolved internally: deployed mycelium inventory
+first, `release --dry-run` fallback for not-yet-deployed siblings (requires
+--domain; --site-path for a non-default site). An explicit "uri" skips
+resolution entirely. Resolution reads live deploy state, so sync is only
+idempotent relative to a fixed deploy point: run `release` for all siblings
+before `sync`, not interleaved with it.
+
+After a successful run, this relation's bonds exactly equal the spec, in spec
+order; every other relation is left untouched. `with` is replaced wholesale
+per entry (not merged) — same as `hatch bond set`.
+
+`--check` computes the add/update/remove diff without writing anything. If
+there is any drift it exits 7 (distinct from the normal error exit 1) so CI
+or a release pipeline can gate on it; with no drift it exits 0.
+
+Reading bonds is a job for afdata (`value`/`get`/`paths` on spore.core.json),
+not hypha — hatch is write-only, there is no `bond show`.
+
+Examples:
+  hypha hatch bond sync --relation follows --spec ./follows.json --domain cmn.dev
+  hypha hatch bond sync --relation follows --spec - --domain cmn.dev --site-path ./deploy/cmn.dev
+  hypha hatch bond sync --relation follows --spec ./follows.json --check
+  hypha hatch bond sync --relation depends_on --spec '[]'   # clears the relation
+```
+
 ### hypha hatch tree - Manage tree configuration in spore.core.json
 
 ```text
-Manage tree configuration in spore.core.json
-
 Usage: tree <COMMAND>
 
 Commands:
@@ -454,8 +488,6 @@ Options:
 #### hypha hatch tree set - Set tree configuration fields
 
 ```text
-Set tree configuration fields
-
 Usage: set [OPTIONS]
 
 Options:
@@ -475,8 +507,6 @@ Options:
 #### hypha hatch tree show - Show current tree configuration
 
 ```text
-Show current tree configuration
-
 Usage: show
 
 Options:
@@ -487,8 +517,6 @@ Options:
 ## hypha release - Sign and publish spore to mycelium site
 
 ```text
-Sign and publish spore to mycelium site
-
 Usage: release [OPTIONS] --domain <DOMAIN>
 
 Options:
@@ -531,8 +559,6 @@ Examples:
 ## hypha lineage - Trace spore lineage: descendants (in, default) or ancestors (out)
 
 ```text
-Trace spore lineage: descendants (in, default) or ancestors (out)
-
 Usage: lineage [OPTIONS] <URI>
 
 Arguments:
@@ -572,8 +598,6 @@ Examples:
 ## hypha search - Search for spores by keyword (semantic search via Synapse)
 
 ```text
-Search for spores by keyword (semantic search via Synapse)
-
 Usage: search [OPTIONS] <QUERY>
 
 Arguments:
@@ -614,8 +638,6 @@ Examples:
 ## hypha mycelium - Manage local mycelium site
 
 ```text
-Manage local mycelium site
-
 Usage: mycelium <COMMAND>
 
 Commands:
@@ -623,6 +645,7 @@ Commands:
   status    Show site status
   serve     Start a local HTTP server to serve the site (for debugging)
   nutrient  Manage nutrient methods (add/remove/clear)
+  spore     Manage published spores in the inventory (yank/unyank)
   pulse     Send a pulse to a synapse indexer
   help      Print this message or the help of the given subcommand(s)
 
@@ -634,8 +657,6 @@ Options:
 ### hypha mycelium root - Establish a new site for a domain (or update existing)
 
 ```text
-Establish a new site for a domain (or update existing)
-
 Usage: root [OPTIONS] [DOMAIN]
 
 Arguments:
@@ -689,8 +710,6 @@ Examples:
 ### hypha mycelium status - Show site status
 
 ```text
-Show site status
-
 Usage: status [OPTIONS] [DOMAIN]
 
 Arguments:
@@ -716,8 +735,6 @@ Examples:
 ### hypha mycelium serve - Start a local HTTP server to serve the site (for debugging)
 
 ```text
-Start a local HTTP server to serve the site (for debugging)
-
 Usage: serve [OPTIONS] [DOMAIN]
 
 Arguments:
@@ -744,8 +761,6 @@ Examples:
 ### hypha mycelium nutrient - Manage nutrient methods (add/remove/clear)
 
 ```text
-Manage nutrient methods (add/remove/clear)
-
 Usage: nutrient <COMMAND>
 
 Commands:
@@ -768,8 +783,6 @@ Examples:
 #### hypha mycelium nutrient add - Add or update a nutrient method (upsert by type)
 
 ```text
-Add or update a nutrient method (upsert by type)
-
 Usage: add [OPTIONS] --type <TYPE> <DOMAIN>
 
 Arguments:
@@ -793,8 +806,6 @@ Options:
 #### hypha mycelium nutrient remove - Remove a nutrient method by type
 
 ```text
-Remove a nutrient method by type
-
 Usage: remove [OPTIONS] --type <TYPE> <DOMAIN>
 
 Arguments:
@@ -815,8 +826,6 @@ Options:
 #### hypha mycelium nutrient clear - Remove all nutrient methods
 
 ```text
-Remove all nutrient methods
-
 Usage: clear [OPTIONS] <DOMAIN>
 
 Arguments:
@@ -831,11 +840,93 @@ Options:
           Print help
 ```
 
+### hypha mycelium spore - Manage published spores in the inventory (yank/unyank)
+
+```text
+Usage: spore <COMMAND>
+
+Commands:
+  yank    Yank a spore from the inventory (delist; keeps published bytes)
+  unyank  Unyank a previously yanked spore (re-add from its kept manifest)
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+Adding a spore is not here — that happens as a side effect of `hypha release`.
+These manage the post-publish lifecycle of a spore already in the inventory.
+
+Examples:
+  hypha mycelium spore yank --id afconfig --site-path deploy/cmn.dev
+  hypha mycelium spore yank --id afconfig --purge
+  hypha mycelium spore unyank --id afconfig --site-path deploy/cmn.dev
+```
+
+#### hypha mycelium spore yank - Yank a spore from the inventory (delist; keeps published bytes)
+
+```text
+Usage: yank [OPTIONS] --id <ID>
+
+Options:
+      --id <ID>
+          Spore id to yank from the inventory
+
+      --domain <DOMAIN>
+          Domain (default: inferred from the site; only needed to disambiguate ~/.cmn sites)
+
+      --site-path <SITE_PATH>
+          Custom site directory (default: ~/.cmn/mycelium/<domain>)
+
+      --purge
+          Also delete the spore's published manifest + archive files
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Removes the spore's entry from the domain's mycelium listing and re-signs the
+mycelium + cmn.json. Only the mycelium capsule changes — every other spore
+capsule is untouched, so this is far cheaper than `release --clean-published`.
+
+The domain is inferred from the site's cmn.json; pass --site-path (or --domain
+to pick among multiple ~/.cmn sites). By default the spore's manifest and
+archive stay published so existing `cmn://<domain>/<hash>` references keep
+resolving (crates.io `yank` semantics); --purge also deletes those files.
+
+Examples:
+  hypha mycelium spore yank --id afconfig --site-path deploy/cmn.dev
+  hypha mycelium spore yank --id afconfig --purge
+```
+
+#### hypha mycelium spore unyank - Unyank a previously yanked spore (re-add from its kept manifest)
+
+```text
+Usage: unyank [OPTIONS] --id <ID>
+
+Options:
+      --id <ID>
+          Spore id to restore to the inventory
+
+      --domain <DOMAIN>
+          Domain (default: inferred from the site; only needed to disambiguate ~/.cmn sites)
+
+      --site-path <SITE_PATH>
+          Custom site directory (default: ~/.cmn/mycelium/<domain>)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Re-adds a yanked spore to the inventory using its still-published manifest, then
+re-signs. Fails if the manifest was purged (run `hypha release` instead) or the
+id is already listed.
+
+Examples:
+  hypha mycelium spore unyank --id afconfig --site-path deploy/cmn.dev
+```
+
 ### hypha mycelium pulse - Send a pulse to a synapse indexer
 
 ```text
-Send a pulse to a synapse indexer
-
 Usage: pulse [OPTIONS] --file <FILE>
 
 Options:
@@ -859,8 +950,6 @@ Examples:
 ## hypha synapse - Manage Synapse node connections
 
 ```text
-Manage Synapse node connections
-
 Usage: synapse <COMMAND>
 
 Commands:
@@ -881,8 +970,6 @@ Options:
 ### hypha synapse discover - Discover Synapse instances via the network
 
 ```text
-Discover Synapse instances via the network
-
 Usage: discover [OPTIONS]
 
 Options:
@@ -903,8 +990,6 @@ Examples:
 ### hypha synapse list - List configured Synapse nodes
 
 ```text
-List configured Synapse nodes
-
 Usage: list
 
 Options:
@@ -918,8 +1003,6 @@ Examples:
 ### hypha synapse health - Check health of a Synapse instance
 
 ```text
-Check health of a Synapse instance
-
 Usage: health [OPTIONS] [SYNAPSE]
 
 Arguments:
@@ -942,8 +1025,6 @@ Examples:
 ### hypha synapse add - Add a Synapse node
 
 ```text
-Add a Synapse node
-
 Usage: add <URL>
 
 Arguments:
@@ -961,8 +1042,6 @@ Examples:
 ### hypha synapse remove - Remove a Synapse node
 
 ```text
-Remove a Synapse node
-
 Usage: remove <DOMAIN>
 
 Arguments:
@@ -980,8 +1059,6 @@ Examples:
 ### hypha synapse use - Set default Synapse node
 
 ```text
-Set default Synapse node
-
 Usage: use <DOMAIN>
 
 Arguments:
@@ -999,8 +1076,6 @@ Examples:
 ### hypha synapse config - Configure a Synapse node (token, etc.)
 
 ```text
-Configure a Synapse node (token, etc.)
-
 Usage: config [OPTIONS] <DOMAIN>
 
 Arguments:
@@ -1022,8 +1097,6 @@ Examples:
 ## hypha cache - Manage local cache
 
 ```text
-Manage local cache
-
 Usage: cache <COMMAND>
 
 Commands:
@@ -1040,8 +1113,6 @@ Options:
 ### hypha cache list - List all cached spores
 
 ```text
-List all cached spores
-
 Usage: list
 
 Options:
@@ -1056,8 +1127,6 @@ Examples:
 ### hypha cache clean - Remove old or all cached items
 
 ```text
-Remove old or all cached items
-
 Usage: clean [OPTIONS]
 
 Options:
@@ -1074,8 +1143,6 @@ Examples:
 ### hypha cache path - Show local filesystem path for a cached spore
 
 ```text
-Show local filesystem path for a cached spore
-
 Usage: path <URI>
 
 Arguments:
@@ -1093,8 +1160,6 @@ Examples:
 ## hypha config - View or modify hypha configuration
 
 ```text
-View or modify hypha configuration
-
 Usage: config <COMMAND>
 
 Commands:
@@ -1110,8 +1175,6 @@ Options:
 ### hypha config list - Show current configuration (merged defaults + config.toml)
 
 ```text
-Show current configuration (merged defaults + config.toml)
-
 Usage: list
 
 Options:
@@ -1126,8 +1189,6 @@ Examples:
 ### hypha config set - Set a configuration value
 
 ```text
-Set a configuration value
-
 Usage: set <KEY> <VALUE>
 
 Arguments:
@@ -1183,8 +1244,6 @@ Examples:
 ## hypha skill - Install, uninstall, or inspect the bundled Hypha agent skill
 
 ```text
-Install, uninstall, or inspect the bundled Hypha agent skill
-
 Usage: skill <COMMAND>
 
 Commands:
@@ -1207,8 +1266,6 @@ Examples:
 ### hypha skill status - Report whether the bundled Hypha skill is installed and current
 
 ```text
-Report whether the bundled Hypha skill is installed and current
-
 Usage: status [OPTIONS]
 
 Options:
@@ -1237,8 +1294,6 @@ Options:
 ### hypha skill install - Install or refresh the bundled Hypha skill
 
 ```text
-Install or refresh the bundled Hypha skill
-
 Usage: install [OPTIONS]
 
 Options:
@@ -1267,8 +1322,6 @@ Options:
 ### hypha skill uninstall - Remove the bundled Hypha skill
 
 ```text
-Remove the bundled Hypha skill
-
 Usage: uninstall [OPTIONS]
 
 Options:
@@ -1293,3 +1346,4 @@ Options:
   -h, --help
           Print help
 ```
+AFDATA: 0.19.1

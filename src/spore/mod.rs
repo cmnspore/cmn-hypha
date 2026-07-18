@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+mod bond_sync;
 mod bonds;
 mod hatch;
 mod release;
@@ -9,6 +10,7 @@ mod updated_at;
 
 use substrate::{SporeCore, SporeTree, SPORE_CORE_SCHEMA};
 
+pub use bond_sync::{handle_bond_sync, BOND_SYNC_DRIFT_EXIT_CODE};
 pub use bonds::{handle_bond_clear, handle_bond_remove, handle_bond_set};
 pub use hatch::{handle_hatch, handle_tree_set, handle_tree_show, HatchArgs};
 pub use release::{handle_release, ArchiveFormat, ReleaseArgs};
@@ -59,10 +61,23 @@ fn load_draft() -> Result<(std::path::PathBuf, SporeCore), (String, String)> {
     let spore_core_path = working_dir.join("spore.core.json");
 
     let draft: SporeCore = if spore_core_path.exists() {
-        match std::fs::read_to_string(&spore_core_path) {
-            Ok(content) => serde_json::from_str(&content)
-                .unwrap_or_else(|_| create_default_spore_core(&working_dir)),
-            Err(_) => create_default_spore_core(&working_dir),
+        let content = match std::fs::read_to_string(&spore_core_path) {
+            Ok(content) => content,
+            Err(e) => {
+                return Err((
+                    "spore_read_failed".to_string(),
+                    format!("Failed to read {}: {}", spore_core_path.display(), e),
+                ))
+            }
+        };
+        match serde_json::from_str(&content) {
+            Ok(draft) => draft,
+            Err(e) => {
+                return Err((
+                    "spore_parse_failed".to_string(),
+                    format!("Failed to parse {}: {}", spore_core_path.display(), e),
+                ))
+            }
         }
     } else {
         create_default_spore_core(&working_dir)

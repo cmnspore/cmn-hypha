@@ -32,7 +32,7 @@ hypha sense cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2
 
 ```json
 {
-  "code": "ok",
+  "kind": "result",
   "result": {
     "spore": {
       "$schema": "https://cmn.dev/schemas/v1/spore.json",
@@ -85,7 +85,7 @@ hypha sense cmn://cmn.dev
 
 ```json
 {
-  "code": "ok",
+  "kind": "result",
   "result": {
     "mycelium": {
       "$schema": "https://cmn.dev/schemas/v1/mycelium.json",

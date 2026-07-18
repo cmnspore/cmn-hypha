@@ -126,16 +126,23 @@ mod tests {
     #[test]
     fn test_sanitize_for_path_basic() {
         assert_eq!(sanitize_for_path("cmn-spec"), "cmn-spec");
-        assert_eq!(sanitize_for_path("my_project"), "my_project");
+        assert_eq!(sanitize_for_path("my_project"), "my-project");
     }
 
     #[test]
     fn test_sanitize_for_path_spaces() {
         assert_eq!(
             sanitize_for_path("CMN Protocol Specification"),
-            "CMN-Protocol-Specification"
+            "cmn-protocol-specification"
         );
-        assert_eq!(sanitize_for_path("a  b"), "a--b");
+        assert_eq!(sanitize_for_path("a  b"), "a-b");
+    }
+
+    #[test]
+    fn test_sanitize_for_path_preserves_version_dots() {
+        assert_eq!(sanitize_for_path("Ubuntu 16.04"), "ubuntu-16.04");
+        assert_eq!(sanitize_for_path("v1.2.3"), "v1.2.3");
+        assert_eq!(sanitize_for_path("a.b"), "a-b");
     }
 
     #[test]
@@ -146,9 +153,9 @@ mod tests {
 
     #[test]
     fn test_sanitize_for_path_unicode_preserved() {
-        assert_eq!(sanitize_for_path("CMN协议规范"), "CMN协议规范");
+        assert_eq!(sanitize_for_path("CMN协议规范"), "cmn协议规范");
         assert_eq!(sanitize_for_path("数据库工具"), "数据库工具");
-        assert_eq!(sanitize_for_path("cafe\u{301}-utils"), "cafe\u{301}-utils");
+        assert_eq!(sanitize_for_path("cafe\u{301}-utils"), "cafe-utils");
     }
 
     #[test]
@@ -161,7 +168,7 @@ mod tests {
     fn test_sanitize_for_path_traversal_safe() {
         assert_eq!(sanitize_for_path(".."), "spore");
         assert_eq!(sanitize_for_path("."), "spore");
-        assert_eq!(sanitize_for_path("../etc"), "-etc");
+        assert_eq!(sanitize_for_path("../etc"), "etc");
         assert_eq!(sanitize_for_path(".git"), "git");
         assert_eq!(sanitize_for_path(".cmn"), "cmn");
         assert_eq!(sanitize_for_path("...hidden"), "hidden");

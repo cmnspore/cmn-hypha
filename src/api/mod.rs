@@ -1,82 +1,91 @@
-#![allow(clippy::print_stdout)]
-// Agent-First Data output layer — the ONLY place println! should appear.
-// All other code must use Output methods (ok/error/warn/progress/startup).
+// Agent-First Data output layer. All CLI code emits through Output methods.
 
 use serde::Serialize;
 use std::process::ExitCode;
 
 /// Result type that handles output formatting and exit codes.
 ///
-/// Builds Agent-First Data-compliant JSON (code/result/trace/error), redacts secrets,
-/// formats via agent_first_data, and prints protocol/log events to stdout.
+/// Builds and emits Agent-First Data protocol events through [`agent_first_data::CliEmitter`].
 pub struct Output {
     format: agent_first_data::OutputFormat,
 }
 
-#[allow(clippy::print_stdout)]
+fn built_event(
+    result: Result<agent_first_data::Event, agent_first_data::BuildError>,
+) -> agent_first_data::Event {
+    result.unwrap_or_else(|err| agent_first_data::build_cli_error(&err.to_string(), None))
+}
+
 impl Output {
     pub fn new(format: agent_first_data::OutputFormat) -> Self {
         Self { format }
     }
 
-    fn format(&self, value: &serde_json::Value) -> String {
-        agent_first_data::cli_output_with_options(
-            value,
-            self.format,
-            &agent_first_data::OutputOptions::default(),
-        )
+    /// Best-effort emit for mid-stream events (progress/log/warn): a failed
+    /// write (including a hung-up reader) is intentionally ignored so
+    /// diagnostics never abort the command.
+    fn emit(&self, event: agent_first_data::Event) {
+        let stdout = std::io::stdout();
+        let mut emitter = agent_first_data::CliEmitter::new(stdout.lock(), self.format);
+        let _ = emitter.emit(event);
     }
 
-    /// Emit a pre-built AFDATA value whose top-level `code` is already set.
-    pub fn value(&self, mut value: serde_json::Value) -> ExitCode {
-        agent_first_data::redact_secrets_in_place(&mut value);
-        println!("{}", self.format(&value));
-        ExitCode::SUCCESS
+    /// Emit a terminal event (`result`/`error`) and resolve the process exit
+    /// code the broken-pipe-safe way, mirroring agent-first-data's one-shot CLI
+    /// contract ([`agent_first_data::CliEmitter::finish`]): `success_code` on a
+    /// clean write, `0` if the reader hung up (broken pipe), `4` on any other
+    /// write/validation failure. Replaces the old "emit-then-return-a-fixed-code"
+    /// dance, which reported success even when the terminal event failed to write.
+    fn finish(&self, event: agent_first_data::Event, success_code: u8) -> ExitCode {
+        let stdout = std::io::stdout();
+        let mut emitter = agent_first_data::CliEmitter::new(stdout.lock(), self.format);
+        ExitCode::from(emitter.finish(event, success_code))
     }
 
-    /// {code: "ok", result: ...} → stdout
+    /// `{kind: "result", result: ..., trace: {}}` → stdout.
     pub fn ok<T: Serialize>(&self, result: T) -> ExitCode {
         let result_value = serde_json::to_value(&result).unwrap_or_default();
-        let mut resp = agent_first_data::build_json_ok(result_value, None);
-        agent_first_data::redact_secrets_in_place(&mut resp);
-        println!("{}", self.format(&resp));
-        ExitCode::SUCCESS
+        self.finish(agent_first_data::json_result(result_value).build(), 0)
     }
 
-    /// {code: "ok", result: ..., trace: ...} → stdout
+    /// `{kind: "result", result: ..., trace: ...}` → stdout.
     pub fn ok_trace<T: Serialize>(&self, result: T, trace: impl Serialize) -> ExitCode {
         let result_value = serde_json::to_value(&result).unwrap_or_default();
         let trace_value = serde_json::to_value(&trace).unwrap_or_default();
-        let mut resp = agent_first_data::build_json_ok(result_value, Some(trace_value));
-        agent_first_data::redact_secrets_in_place(&mut resp);
-        println!("{}", self.format(&resp));
-        ExitCode::SUCCESS
+        self.finish(
+            agent_first_data::json_result(result_value)
+                .trace(trace_value)
+                .build(),
+            0,
+        )
     }
 
-    /// {code: "<error_code>", error: "msg", hint: "...", trace: {duration_ms: 0}} → stdout
+    /// `{kind: "result", result: ...}` → stdout, with a caller-chosen exit code.
+    ///
+    /// For machine-checkable "is there drift" style results (e.g. `hatch bond
+    /// sync --check`) where the outcome is a normal, well-formed result (not an
+    /// error) but CI still needs a distinct non-zero exit to gate on.
+    pub fn ok_with_code<T: Serialize>(&self, result: T, code: u8) -> ExitCode {
+        let result_value = serde_json::to_value(&result).unwrap_or_default();
+        self.finish(agent_first_data::json_result(result_value).build(), code)
+    }
+
+    /// `{kind: "error", error: {code, message, hint, retryable}, trace}` → stdout.
     pub fn error(&self, error_code: &str, message: &str) -> ExitCode {
         self.error_hint(error_code, message, None)
     }
 
     /// Like [`error`] but with an actionable hint for remediation.
     pub fn error_hint(&self, error_code: &str, message: &str, hint: Option<&str>) -> ExitCode {
-        let mut fields = serde_json::Map::new();
-        fields.insert(
-            "error".into(),
-            serde_json::Value::String(message.to_string()),
-        );
-        fields.insert(
-            "hint".into(),
-            serde_json::Value::String(actionable_hint(error_code, hint).to_string()),
-        );
-        let mut resp = agent_first_data::build_json(
-            error_code,
-            serde_json::Value::Object(fields),
-            Some(serde_json::json!({"duration_ms": 0})),
-        );
-        agent_first_data::redact_secrets_in_place(&mut resp);
-        println!("{}", self.format(&resp));
-        ExitCode::FAILURE
+        self.finish(
+            built_event(
+                agent_first_data::json_error(error_code, message)
+                    .hint(actionable_hint(error_code, hint))
+                    .trace(serde_json::json!({"duration_ms": 0}))
+                    .build(),
+            ),
+            1,
+        )
     }
 
     /// Output error from anyhow::Error
@@ -90,7 +99,7 @@ impl Output {
     }
 
     /// Agent-First Data progress step → stdout
-    /// {"code": "progress", "current": N, "total": M, "message": "...", ...}
+    /// `{kind: "progress", progress: {current, total, message, ...}, trace}`.
     pub fn progress(&self, step: u32, total: u32, message: &str, data: serde_json::Value) {
         let mut fields = match data {
             serde_json::Value::Object(map) => map,
@@ -99,36 +108,34 @@ impl Output {
         fields.insert("current".into(), step.into());
         fields.insert("total".into(), total.into());
         fields.insert("message".into(), message.into());
-        let mut resp =
-            agent_first_data::build_json("progress", serde_json::Value::Object(fields), None);
-        agent_first_data::redact_secrets_in_place(&mut resp);
-        println!("{}", self.format(&resp));
+        self.emit(agent_first_data::json_progress(serde_json::Value::Object(fields)).build());
     }
 
-    /// Byte-level download progress → stdout
-    /// {"code": "download_progress", "downloaded_bytes": N, "total_bytes": M}
+    /// Byte-level protocol-v1 download progress → stdout.
+    /// `{kind: "progress", progress: {event, downloaded_bytes, total_bytes}}`.
     pub fn download_progress(&self, downloaded_bytes: u64, total_bytes: Option<u64>) {
-        let mut resp = agent_first_data::build_json(
-            "download_progress",
-            serde_json::json!({
+        self.emit(
+            agent_first_data::json_progress(serde_json::json!({
+                "event": "download_progress",
                 "downloaded_bytes": downloaded_bytes,
                 "total_bytes": total_bytes,
-            }),
-            None,
+            }))
+            .build(),
         );
-        agent_first_data::redact_secrets_in_place(&mut resp);
-        println!("{}", self.format(&resp));
     }
 
     /// Non-fatal warning → stdout
     pub fn warn(&self, code: &str, message: &str) {
-        let mut resp =
-            agent_first_data::build_json(code, serde_json::json!({"message": message}), None);
-        agent_first_data::redact_secrets_in_place(&mut resp);
-        println!("{}", self.format(&resp));
+        self.emit(
+            agent_first_data::json_log(serde_json::json!({
+                "event": code,
+                "message": message,
+            }))
+            .build(),
+        );
     }
 
-    /// {code: "log", event: "startup", args: ..., config: ..., env: ...} → stdout
+    /// Emit a protocol-v1 startup log event to stdout.
     pub fn startup(&self, args: serde_json::Value) {
         let (config, config_error) = match crate::config::HyphaConfig::load() {
             Ok(cfg) => (serde_json::to_value(&cfg).unwrap_or_default(), None),
@@ -146,9 +153,8 @@ impl Output {
             "CMN_HOME": std::env::var("CMN_HOME").ok(),
             "SYNAPSE_TOKEN_SECRET": std::env::var("SYNAPSE_TOKEN_SECRET").ok(),
         });
-        let mut resp = agent_first_data::build_json(
-            "log",
-            serde_json::json!({
+        self.emit(
+            agent_first_data::json_log(serde_json::json!({
                 "category": "startup",
                 "event": "startup",
                 "hypha_version": env!("CARGO_PKG_VERSION"),
@@ -156,11 +162,9 @@ impl Output {
                 "config_error": config_error,
                 "args": args,
                 "env": env
-            }),
-            None,
+            }))
+            .build(),
         );
-        agent_first_data::redact_secrets_in_place(&mut resp);
-        println!("{}", self.format(&resp));
     }
 }
 

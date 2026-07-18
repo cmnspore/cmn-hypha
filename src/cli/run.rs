@@ -14,7 +14,7 @@ fn emit_cli_json(message: &str) {
 
 fn build_runtime() -> Result<tokio::runtime::Runtime, ExitCode> {
     tokio::runtime::Runtime::new().map_err(|e| {
-        emit_cli_json(&agent_first_data::output_json(&cli_error_value(
+        emit_cli_json(&render_cli_json(&cli_error_value(
             &format!("Failed to create async runtime: {}", e),
             "retry the command; if it repeats, check available system resources",
         )));
@@ -22,11 +22,8 @@ fn build_runtime() -> Result<tokio::runtime::Runtime, ExitCode> {
     })
 }
 
-fn emit_startup(out: &Output, cli: &Cli, log: &[String]) {
-    if log
-        .iter()
-        .any(|f| matches!(f.as_str(), "startup" | "all" | "*"))
-    {
+fn emit_startup(out: &Output, cli: &Cli, log: &agent_first_data::LogFilters) {
+    if log.enabled("startup") {
         let mut args = serde_json::to_value(&cli.command)
             .unwrap_or_else(|_| serde_json::Value::Object(Default::default()));
         if let Some(obj) = args.as_object_mut() {
@@ -34,7 +31,7 @@ fn emit_startup(out: &Output, cli: &Cli, log: &[String]) {
                 "output".to_string(),
                 serde_json::Value::String(cli.output.clone()),
             );
-            if let Ok(log_value) = serde_json::to_value(log) {
+            if let Ok(log_value) = serde_json::to_value(log.as_slice()) {
                 obj.insert("log".to_string(), log_value);
             }
         }
@@ -44,7 +41,7 @@ fn emit_startup(out: &Output, cli: &Cli, log: &[String]) {
 
 pub fn execute(cli: Cli) -> ExitCode {
     let output_format = agent_first_data::cli_parse_output(&cli.output).unwrap_or_else(|e| {
-        emit_cli_json(&agent_first_data::output_json(&cli_error_value(
+        emit_cli_json(&render_cli_json(&cli_error_value(
             &e,
             "use --output json, --output yaml, or --output plain",
         )));
@@ -166,6 +163,13 @@ pub fn execute(cli: Cli) -> ExitCode {
                     spore::handle_bond_remove(&out, uri, relation)
                 }
                 HatchBondCommands::Clear => spore::handle_bond_clear(&out),
+                HatchBondCommands::Sync {
+                    relation,
+                    spec,
+                    domain,
+                    site_path,
+                    check,
+                } => spore::handle_bond_sync(&out, relation, &spec, domain, site_path, check),
             },
             Some(HatchCommands::Tree { command }) => match command {
                 HatchTreeCommands::Set {
@@ -292,6 +296,30 @@ pub fn execute(cli: Cli) -> ExitCode {
                 NutrientCommands::Clear { domain, site_path } => {
                     mycelium::handle_nutrient_clear(&out, &domain, site_path.as_deref())
                 }
+            },
+            MyceliumAction::Spore { command } => match command {
+                SporeCommands::Yank {
+                    id,
+                    domain,
+                    site_path,
+                    purge,
+                } => mycelium::handle_spore_yank(
+                    &out,
+                    domain.as_deref(),
+                    &id,
+                    site_path.as_deref(),
+                    purge,
+                ),
+                SporeCommands::Unyank {
+                    id,
+                    domain,
+                    site_path,
+                } => mycelium::handle_spore_unyank(
+                    &out,
+                    domain.as_deref(),
+                    &id,
+                    site_path.as_deref(),
+                ),
             },
             MyceliumAction::Status {
                 domain,

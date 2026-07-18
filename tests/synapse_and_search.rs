@@ -20,7 +20,7 @@ fn test_synapse_list_empty() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
-    assert_eq!(json["code"], "ok");
+    assert_eq!(json["kind"], "result");
     assert_eq!(json["result"]["count"], 0);
     assert_eq!(json["result"]["nodes"], serde_json::json!([]));
     assert_eq!(json["result"]["default"], serde_json::Value::Null);
@@ -39,7 +39,7 @@ fn test_synapse_add() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
-    assert_eq!(json["code"], "ok");
+    assert_eq!(json["kind"], "result");
     assert_eq!(json["result"]["domain"], "synapse.cmn.dev");
     assert_eq!(json["result"]["url"], "https://synapse.cmn.dev");
     // First node becomes default
@@ -127,7 +127,7 @@ fn test_synapse_remove() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
-    assert_eq!(json["code"], "ok");
+    assert_eq!(json["kind"], "result");
     assert_eq!(json["result"]["removed"], "test.example.com");
 
     // Verify list is empty

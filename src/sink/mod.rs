@@ -91,11 +91,17 @@ impl From<&str> for HyphaError {
     }
 }
 
-/// Prints events as afdata JSON to stdout — used by the hypha CLI.
+/// Emits events as afdata JSON to stdout — used by library callers.
 pub struct AfDataSink;
 
+fn emit(event: agent_first_data::Event) {
+    let stdout = std::io::stdout();
+    let mut emitter =
+        agent_first_data::CliEmitter::new(stdout.lock(), agent_first_data::OutputFormat::Json);
+    let _ = emitter.emit(event);
+}
+
 impl EventSink for AfDataSink {
-    #[allow(clippy::print_stdout)]
     fn emit(&self, event: HyphaEvent) {
         match event {
             HyphaEvent::Progress {
@@ -103,46 +109,38 @@ impl EventSink for AfDataSink {
                 total,
                 message,
             } => {
-                let v = agent_first_data::build_json(
-                    "progress",
-                    serde_json::json!({
+                emit(
+                    agent_first_data::json_progress(serde_json::json!({
                         "current": current,
                         "total": total,
                         "message": message,
-                    }),
-                    None,
+                    }))
+                    .build(),
                 );
-                println!("{}", agent_first_data::output_json(&v));
             }
             HyphaEvent::DownloadProgress {
                 downloaded_bytes,
                 total_bytes,
             } => {
-                let v = agent_first_data::build_json(
-                    "download_progress",
-                    serde_json::json!({
+                emit(
+                    agent_first_data::json_progress(serde_json::json!({
+                        "event": "download_progress",
                         "downloaded_bytes": downloaded_bytes,
                         "total_bytes": total_bytes,
-                    }),
-                    None,
+                    }))
+                    .build(),
                 );
-                println!("{}", agent_first_data::output_json(&v));
             }
             HyphaEvent::Log { message } => {
-                let v = agent_first_data::build_json(
-                    "log",
-                    serde_json::json!({ "message": message }),
-                    None,
-                );
-                println!("{}", agent_first_data::output_json(&v));
+                emit(agent_first_data::json_log(serde_json::json!({ "message": message })).build());
             }
             HyphaEvent::Warn { message } => {
-                let v = agent_first_data::build_json(
-                    "warn",
-                    serde_json::json!({ "message": message }),
-                    None,
+                emit(
+                    agent_first_data::json_log(
+                        serde_json::json!({ "event": "warn", "message": message }),
+                    )
+                    .build(),
                 );
-                println!("{}", agent_first_data::output_json(&v));
             }
         }
     }

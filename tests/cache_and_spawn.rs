@@ -17,7 +17,7 @@ fn test_cache_list_empty() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("\"code\":\"ok\""),
+        stdout.contains("\"kind\":\"result\""),
         "should return success: {}",
         stdout
     );
@@ -37,7 +37,7 @@ fn test_cache_clean_empty() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("\"code\":\"ok\""),
+        stdout.contains("\"kind\":\"result\""),
         "should return success: {}",
         stdout
     );

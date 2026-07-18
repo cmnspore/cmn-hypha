@@ -44,8 +44,25 @@ pub(super) fn build_archive_delta_url_from_endpoint(
 }
 
 /// Validate a bond directory segment used under `.cmn/bonds/`.
-/// Accepts either a safe local path segment or a normalized CMN hash.
 pub(super) fn is_safe_bond_dir_name(name: &str) -> bool {
-    (!name.is_empty() && substrate::local_dir_name(Some(name), None, "") == name)
-        || substrate::parse_hash(name).is_ok()
+    substrate::is_safe_local_path_segment(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bond_dir_validation_checks_safety_without_requiring_canonical_slug_format() {
+        assert!(is_safe_bond_dir_name("Foo"));
+        assert!(is_safe_bond_dir_name("foo_bar"));
+        assert!(is_safe_bond_dir_name("b3.hash"));
+
+        assert!(!is_safe_bond_dir_name(""));
+        assert!(!is_safe_bond_dir_name(".."));
+        assert!(!is_safe_bond_dir_name("bad/name"));
+        assert!(!is_safe_bond_dir_name("bad\\name"));
+        assert!(!is_safe_bond_dir_name("bad name"));
+        assert!(!is_safe_bond_dir_name("bad\x01name"));
+    }
 }

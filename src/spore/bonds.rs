@@ -30,8 +30,7 @@ pub fn handle_bond_set(
                     Some("expected format: KEY=VALUE"),
                 );
             };
-            let value = serde_json::from_str(val_str)
-                .unwrap_or_else(|_| serde_json::Value::String(val_str.to_string()));
+            let value = serde_json::Value::String(val_str.to_string());
             obj.insert(key.to_string(), value);
         }
         Some(serde_json::Value::Object(obj))
@@ -62,15 +61,7 @@ pub fn handle_bond_set(
             existing.reason = reason;
         }
         if let Some(new_with) = with_update {
-            if let Some(serde_json::Value::Object(ref mut existing_obj)) = existing.with {
-                if let serde_json::Value::Object(new_obj) = new_with {
-                    for (k, v) in new_obj {
-                        existing_obj.insert(k, v);
-                    }
-                }
-            } else {
-                existing.with = Some(new_with);
-            }
+            existing.with = Some(new_with);
         }
     } else {
         let Some(rel) = relation else {

@@ -8,14 +8,14 @@ use agent_first_data::skill::{
 use crate::api::Output;
 use crate::cli::{SkillAgentArg, SkillCommand, SkillOptionsArg, SkillScopeArg};
 
-const HYPHA_SKILL: &str = include_str!("SKILL.md");
+const HYPHA_SKILL: &str = include_str!("../../skills/cmn-hypha/SKILL.md");
 
 fn spec() -> SkillSpec<'static> {
     SkillSpec {
-        name: "hypha",
+        name: "cmn-hypha",
         source: HYPHA_SKILL,
-        title: "Hypha",
-        marker_slug: "hypha",
+        title: "CMN Hypha",
+        marker_slug: "cmn-hypha",
     }
 }
 
@@ -28,14 +28,7 @@ pub fn handle_skill(out: &Output, command: SkillCommand) -> ExitCode {
 
     let options = to_afdata_options(options);
     match run_skill_admin(&spec(), action, &options) {
-        Ok(report) => match serde_json::to_value(report) {
-            Ok(value) => out.value(value),
-            Err(err) => out.error_hint(
-                "serialize_error",
-                &format!("Failed to serialize skill report: {err}"),
-                Some("report this bug with the command and --output value used"),
-            ),
-        },
+        Ok(report) => out.ok(report),
         Err(err) => out.error_hint(
             "skill_error",
             &err.message,
@@ -56,7 +49,7 @@ fn to_afdata_options(options: SkillOptionsArg) -> SkillOptions {
         },
         scope: match options.scope {
             SkillScopeArg::Personal => SkillScope::Personal,
-            SkillScopeArg::Project => SkillScope::Project,
+            SkillScopeArg::Project => SkillScope::Workspace,
         },
         skills_dir: options.skills_dir,
         force: options.force,

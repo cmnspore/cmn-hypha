@@ -1,8 +1,8 @@
 [package]
 name = "cmn-hypha"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
-description = "CMN CLI tool — spawn, grow, release, taste, bond, and absorb spores on the Code Mycelial Network"
+description = "The reference CMN client CLI — release spores, query synapses, resolve bonds, and manage your local mycelium."
 license = "MIT"
 repository = "https://github.com/cmnspore/cmn-hypha"
 readme = "README.md"
@@ -19,14 +19,14 @@ path = "src/main.rs"
 
 [dependencies]
 cmn-substrate = { version = "0.3", features = ["client-safe-dns", "archive-zstd"] }
-agent-first-data = { version = "0.13", features = ["cli-help", "cli-help-markdown", "skill-admin"] }
+agent-first-data = "0.19.1"
 clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 anyhow = "1.0"
 thiserror = "2"
 walkdir = "2.5"
-ed25519-dalek = { version = "2.2", features = ["pkcs8", "pem", "zeroize"] }
+ed25519-dalek = { version = "3.0", features = ["pkcs8", "pem", "zeroize"] }
 zeroize = "1"
 rand = "0.10"
 bs58 = "0.5"

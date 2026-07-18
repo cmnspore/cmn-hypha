@@ -10,7 +10,7 @@ pub fn compute_updated_at_ms(
         return Ok(ms);
     }
 
-    let reader = crate::tree::FsReader::new(root_path, follow_rules);
+    let reader = crate::tree::FsReader::new(root_path, exclude_names, follow_rules);
     substrate::max_mtime(&reader, root_path, exclude_names)
 }
 

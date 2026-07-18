@@ -32,6 +32,10 @@ These codes correspond to stages in the visitor resolution pipeline (sense/taste
 | `GIT_URL_CHANGED` | Git repository URL changed since spawn | Re-spawn with new repository |
 | `REPO_IDENTITY_ERR` | Root commit mismatch | Repository was recreated, re-spawn |
 | `bond_error` | Bond operation failed | Check spore.core.json, disk space |
+| `bond_spec_read_failed` | `hatch bond sync` couldn't read `--spec` (file or stdin) | Check the path exists and is readable, or that stdin is being piped |
+| `bond_spec_invalid` | `hatch bond sync` `--spec` is not valid JSON, or an entry is missing `id` | Fix the spec: a JSON array of `{id, reason?, with?, uri?}` objects |
+| `missing_domain` | `hatch bond sync` needs `--domain` to resolve a spec entry's `uri` | Pass `--domain` (and `--site-path` for a non-default site), or give the entry an explicit `uri` |
+| `bond_uri_unresolved` | `hatch bond sync` couldn't resolve a spec entry's `uri`: not deployed, and no sibling `spore.core.json` for the dry-run fallback | Release the dependency first, or give the entry an explicit `uri` |
 | `absorb_error` | Absorb local operation failed | Check permissions, disk space |
 | `synapse_error` | Synapse query failed | Check Synapse URL and network |
 | `NOT_TASTED` | Spore has not been tasted | Run `hypha taste <uri>`, review, record verdict |
@@ -100,12 +104,17 @@ Non-fatal diagnostic events emitted during operations. These use the same Agent-
 
 ### Hypha CLI — Error
 
-The `code` field contains the specific error code. Parse `code` to branch on error type:
+The nested `error.code` field contains the specific error code. Parse `error.code` to branch on error type:
 
 ```json
 {
-  "code": "SIG_FAILED",
-  "error": "Core signature verification failed: invalid signature",
+  "kind": "error",
+  "error": {
+    "code": "SIG_FAILED",
+    "message": "Core signature verification failed: invalid signature",
+    "retryable": false,
+    "hint": "read the error field, check hypha --help for the expected input, and retry"
+  },
   "trace": {
     "duration_ms": 0
   }
@@ -114,8 +123,13 @@ The `code` field contains the specific error code. Parse `code` to branch on err
 
 ```json
 {
-  "code": "invalid_uri",
-  "error": "URI must start with 'cmn://'",
+  "kind": "error",
+  "error": {
+    "code": "invalid_uri",
+    "message": "URI must start with 'cmn://'",
+    "retryable": false,
+    "hint": "use a CMN URI in the form cmn://domain or cmn://domain/b3.hash"
+  },
   "trace": {
     "duration_ms": 0
   }
@@ -128,7 +142,7 @@ The `code` field contains the specific error code. Parse `code` to branch on err
 
 ```json
 {
-  "code": "ok",
+  "kind": "result",
   "result": { "spore": { "..." : "..." } },
   "trace": {
     "uri": "cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2",
@@ -142,10 +156,14 @@ The `code` field contains the specific error code. Parse `code` to branch on err
 
 ```json
 {
-  "code": "error",
-  "error": "Signature verification failed for domain cmn.dev",
+  "kind": "error",
+  "error": {
+    "code": "SIGNATURE_INVALID",
+    "message": "Signature verification failed for domain cmn.dev",
+    "retryable": false,
+    "hint": "verify the signing key and signature before retrying"
+  },
   "trace": {
-    "error_code": "SIGNATURE_INVALID",
     "storage": "redb"
   }
 }
@@ -157,7 +175,7 @@ Success responses include a `result` field with query data and a `trace` field w
 
 ```json
 {
-  "code": "ok",
+  "kind": "result",
   "result": {
     "query": { "hash": "b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2", "max_depth": 10 },
     "lineage": []
@@ -171,20 +189,26 @@ Success responses include a `result` field with query data and a `trace` field w
 
 ### Synapse Access Log
 
-Every request produces a single access log line using Agent-First Data fields at the top level (`code`, request fields, optional `result`/`error`, and `trace`). The `trace` field merges request metadata with handler-level state.
+Every request produces a protocol-v1 log event. Request fields and optional `result`/`error` data live under `log`; `trace` merges request metadata with handler-level state.
 
 JSON format (`log_format: json`):
 
 ```json
 {
-  "code": "request",
-  "method": "GET",
-  "path": "/synapse/spore/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2",
-  "status_code": 404,
-  "error": "Spore not found",
+  "kind": "log",
+  "log": {
+    "method": "GET",
+    "path": "/synapse/spore/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2",
+    "status_code": 404,
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Spore not found",
+      "retryable": false,
+      "hint": "verify the domain/hash and wait for indexing before retrying"
+    }
+  },
   "trace": {
-    "duration_ms": 1,
-    "error_code": "NOT_FOUND"
+    "duration_ms": 1
   }
 }
 ```
@@ -192,7 +216,7 @@ JSON format (`log_format: json`):
 Plain format (`log_format: plain`):
 
 ```text
-code=request method=GET path=/synapse/spore/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 status_code=404 error="Spore not found" trace.duration=1ms trace.error_code=NOT_FOUND
+kind=log log.error.code=NOT_FOUND log.error.message="Spore not found" log.error.retryable=false log.method=GET log.path=/synapse/spore/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2 log.status_code=404 trace.duration=1ms
 ```
 
 The plain format is generated from the same JSON value using `agent_first_data::output_plain` (logfmt-style key/value output).
@@ -210,6 +234,7 @@ Hypha CLI exit codes:
 | 4 | Verification failed |
 | 5 | Git operation failed |
 | 6 | Permission denied |
+| 7 | `hatch bond sync --check` found drift (structured `to_add`/`to_update`/`to_remove` diff on stdout) — distinct from the general error exit (1) so CI/release pipelines can gate on "bonds are out of sync" specifically |
 
 ## Debugging
 

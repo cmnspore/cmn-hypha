@@ -1047,8 +1047,18 @@ pub(crate) fn cli_error_value(message: &str, hint: &str) -> serde_json::Value {
 pub fn parse_or_exit() -> Cli {
     let raw: Vec<String> = std::env::args().collect();
 
-    match agent_first_data::cli_handle_version_or_continue(&raw, "hypha", env!("CARGO_PKG_VERSION"))
-    {
+    let build = match env!("GIT_SHA") {
+        "unknown" => None,
+        sha => Some(sha),
+    };
+    match agent_first_data::cli_handle_version_or_continue(
+        &raw,
+        &Cli::command(),
+        "hypha",
+        Some(env!("DISPLAY_NAME")),
+        env!("CARGO_PKG_VERSION"),
+        build,
+    ) {
         Ok(Some(version)) => {
             let mut stdout = std::io::stdout();
             let _ = std::io::Write::write_all(&mut stdout, version.as_bytes());

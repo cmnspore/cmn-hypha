@@ -16,6 +16,7 @@ fn spec() -> SkillSpec<'static> {
         source: HYPHA_SKILL,
         title: "CMN Hypha",
         marker_slug: "cmn-hypha",
+        assets: &[],
     }
 }
 

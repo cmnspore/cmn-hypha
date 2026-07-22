@@ -1,7 +1,6 @@
 ---
 name: cmn-hypha
 description: "Use the hypha CLI to discover, evaluate, spawn, develop, and release CMN spores."
-disable-model-invocation: true
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 

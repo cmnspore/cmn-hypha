@@ -338,7 +338,7 @@ fn test_bond_status_with_refs() {
     let refs = result["result"]["bonds"].as_array().unwrap();
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0]["bonded"], false);
-    assert!(refs[0]["uri"].as_str().unwrap().contains("example.com"));
+    assert!(refs[0]["cmn_url"].as_str().unwrap().contains("example.com"));
 }
 
 #[test]
@@ -528,7 +528,7 @@ fn test_replicate_basic() {
     let release_stdout = String::from_utf8_lossy(&release_output.stdout);
     let release_result: serde_json::Value = parse_json_last_line(&release_stdout);
     let _hash = release_result["result"]["hash"].as_str().unwrap();
-    let _uri = release_result["result"]["uri"].as_str().unwrap();
+    let _uri = release_result["result"]["cmn_url"].as_str().unwrap();
 
     // Test the --refs mode with no refs to replicate
     let spore2_dir = env.dir.join("spore2");

@@ -215,6 +215,7 @@ mod tests {
             chain_id: None,
             token: None,
             asset_id: None,
+            extra: Default::default(),
         });
         let value = serde_json::to_value(&m).unwrap();
         let formatted = format_mycelium(&value).unwrap();

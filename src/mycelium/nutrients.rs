@@ -42,6 +42,7 @@ pub fn handle_nutrient_add(
         chain_id: None,
         token: None,
         asset_id: None,
+        extra: Default::default(),
     };
     for entry in &with_entries {
         let Some((key, val_str)) = entry.split_once('=') else {
@@ -61,11 +62,14 @@ pub fn handle_nutrient_add(
             "chain_id" => nutrient.chain_id = value.as_u64(),
             "token" => nutrient.token = value.as_str().map(|s| s.to_string()),
             "asset_id" => nutrient.asset_id = value.as_str().map(|s| s.to_string()),
+            // `type` is an open string and the schema is
+            // `additionalProperties: true`, so the field set is open too — a
+            // new payment network must not need a hypha release. Rejecting an
+            // unrecognized key here made the spec's own BOLT12 `offer`
+            // unwritable. The value is stored as parsed JSON, so a caller can
+            // still supply a number or object rather than only a string.
             _ => {
-                return out.error(
-                    "invalid_args",
-                    &format!("Unknown nutrient field: '{}'. Valid: address, recipient, url, label, chain_id, token, asset_id", key),
-                )
+                nutrient.extra.insert(key.to_string(), value);
             }
         }
     }

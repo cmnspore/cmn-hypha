@@ -331,7 +331,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
     if dry_run {
         return out.ok_trace(
             json!({
-                "uri": uri,
+                "cmn_url": uri,
                 "hash": uri_hash,
             }),
             json!({
@@ -453,7 +453,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
         let _ = std::fs::write(&spawned_from_spore_path, &existing_json);
 
         let data = json!({
-            "uri": uri,
+            "cmn_url": uri,
             "hash": uri_hash,
             "spore": existing,
         });
@@ -528,7 +528,7 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
     }
 
     let data = json!({
-        "uri": uri,
+        "cmn_url": uri,
         "hash": uri_hash,
         "spore": spore_manifest,
     });

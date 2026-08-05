@@ -191,7 +191,7 @@ pub async fn verify_spore_with_key_trust(
     key_trust_synapse_witness_mode: crate::config::SynapseWitnessMode,
     from_synapse: bool,
     synapse_url: Option<&str>,
-    synapse_token: Option<&str>,
+    synapse_token_secret: Option<&str>,
 ) -> Result<String, crate::HyphaError> {
     // core.key is mandatory in the two-key model.
     let spore = substrate::decode_spore(manifest).map_err(|e| {
@@ -288,7 +288,7 @@ pub async fn verify_spore_with_key_trust(
                                 url,
                                 key,
                                 &key_domain_cache.domain,
-                                synapse_token,
+                                synapse_token_secret,
                             )
                             .await
                             .unwrap_or(false),
@@ -452,7 +452,7 @@ async fn ask_synapse_key_trust(
     synapse_url: &str,
     key: &str,
     domain: &str,
-    token: Option<&str>,
+    token_secret: Option<&str>,
 ) -> Result<bool, crate::HyphaError> {
     let client = substrate::client::http_client(10).map_err(|e| {
         crate::HyphaError::new(
@@ -460,10 +460,14 @@ async fn ask_synapse_key_trust(
             format!("Failed to create HTTP client: {}", e),
         )
     })?;
-    let resp =
-        substrate::client::fetch_synapse_cmn(&client, synapse_url, domain, fetch_opts(token))
-            .await
-            .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
+    let resp = substrate::client::fetch_synapse_cmn(
+        &client,
+        synapse_url,
+        domain,
+        fetch_opts(token_secret),
+    )
+    .await
+    .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
     let entry: substrate::CmnEntry = serde_json::from_value(resp.result.cmn).map_err(|e| {
         crate::HyphaError::new(
             "synapse_error",

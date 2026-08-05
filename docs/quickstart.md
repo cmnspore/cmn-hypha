@@ -70,7 +70,7 @@ hypha sense cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2
     }
   },
   "trace": {
-    "uri": "cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2",
+    "cmn_url": "cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2",
     "cmn": { "resolved": true },
     "verified": { "core_signature": true, "capsule_signature": true }
   }
@@ -117,7 +117,7 @@ hypha sense cmn://cmn.dev
     }
   },
   "trace": {
-    "uri": "cmn://cmn.dev",
+    "cmn_url": "cmn://cmn.dev",
     "cmn": { "resolved": true },
     "verified": { "core_signature": true, "capsule_signature": true }
   }

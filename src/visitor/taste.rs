@@ -121,8 +121,12 @@ async fn taste_download_lib(
     let remote_tastes = if let Some(synapse_arg) = synapse_url {
         match crate::config::resolve_synapse(Some(synapse_arg), synapse_token_secret) {
             Ok(resolved) => {
-                match fetch_taste_reports(&resolved.url, hash, resolved.token_secret.as_deref())
-                    .await
+                match fetch_taste_reports(
+                    &resolved.synapse_url,
+                    hash,
+                    resolved.token_secret.as_deref(),
+                )
+                .await
                 {
                     Ok(tastes) => Some(tastes),
                     Err(e) => {
@@ -145,7 +149,7 @@ async fn taste_download_lib(
     };
 
     Ok(crate::output::TasteDownloadOutput {
-        uri: uri_str.to_string(),
+        cmn_url: uri_str.to_string(),
         cache_path: spore_path.display().to_string(),
         name: if name.is_empty() { None } else { Some(name) },
         synopsis: if synopsis.is_empty() {
@@ -153,7 +157,7 @@ async fn taste_download_lib(
         } else {
             Some(synopsis)
         },
-        parent,
+        parent_cmn_url: parent,
         taste: taste_verdict,
         remote_tastes,
     })
@@ -193,12 +197,12 @@ async fn taste_record_lib(
     domain_cache.save_taste(hash, &taste_cache)?;
 
     let mut output = crate::output::TasteRecordOutput {
-        uri: uri_str.to_string(),
+        cmn_url: uri_str.to_string(),
         verdict,
         notes: notes.map(|n| n.to_string()),
         tasted_at_epoch_ms: taste_cache.tasted_at_epoch_ms,
         shared: None,
-        synapse: None,
+        synapse_url: None,
         share_error: None,
     };
 
@@ -208,8 +212,8 @@ async fn taste_record_lib(
         .or(config.defaults.taste.domain.as_deref())
         .or(config.defaults.domain.as_deref());
     let effective_synapse = synapse_url
-        .or(config.defaults.taste.synapse.as_deref())
-        .or(config.defaults.synapse.as_deref());
+        .or(config.defaults.taste.synapse_domain.as_deref())
+        .or(config.defaults.synapse_domain.as_deref());
 
     if let (Some(signing_domain), Some(synapse_arg)) = (effective_domain, effective_synapse) {
         match crate::config::resolve_synapse(Some(synapse_arg), synapse_token_secret) {
@@ -219,7 +223,7 @@ async fn taste_record_lib(
                     verdict,
                     notes,
                     signing_domain,
-                    &resolved.url,
+                    &resolved.synapse_url,
                     resolved.token_secret.as_deref(),
                     now_epoch_ms,
                 )
@@ -227,7 +231,7 @@ async fn taste_record_lib(
                 {
                     Ok(_) => {
                         output.shared = Some(true);
-                        output.synapse = Some(resolved.url);
+                        output.synapse_url = Some(resolved.synapse_url);
                     }
                     Err(e) => {
                         sink.emit(crate::HyphaEvent::Warn {
@@ -281,11 +285,11 @@ async fn taste_domain_download_lib(
         });
 
     Ok(crate::output::TasteDownloadOutput {
-        uri: uri_str.to_string(),
+        cmn_url: uri_str.to_string(),
         cache_path: domain_cache.mycelium_dir().display().to_string(),
         name: Some(name),
         synopsis: None,
-        parent: None,
+        parent_cmn_url: None,
         taste: taste_verdict,
         remote_tastes: None,
     })
@@ -320,12 +324,12 @@ fn taste_domain_record_lib(
     domain_cache.save_domain_taste(&taste_cache)?;
 
     Ok(crate::output::TasteRecordOutput {
-        uri: uri_str.to_string(),
+        cmn_url: uri_str.to_string(),
         verdict,
         notes: notes.map(|n| n.to_string()),
         tasted_at_epoch_ms: taste_cache.tasted_at_epoch_ms,
         shared: None,
-        synapse: None,
+        synapse_url: None,
         share_error: None,
     })
 }
@@ -439,7 +443,7 @@ async fn share_taste_report_lib(
     notes: Option<&str>,
     signing_domain: &str,
     synapse_url: &str,
-    synapse_token: Option<&str>,
+    synapse_token_secret: Option<&str>,
     now_epoch_ms: u64,
 ) -> Result<(), crate::HyphaError> {
     crate::site::validate_site_domain_path(signing_domain)?;
@@ -554,7 +558,7 @@ async fn share_taste_report_lib(
             format!("Failed to create HTTP client: {}", e),
         )
     })?;
-    let opts = fetch_opts(synapse_token);
+    let opts = fetch_opts(synapse_token_secret);
     substrate::client::post_synapse_pulse(&client, synapse_url, &payload_value, opts)
         .await
         .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
@@ -566,7 +570,7 @@ async fn share_taste_report_lib(
 async fn fetch_taste_reports(
     synapse_url: &str,
     hash: &str,
-    token: Option<&str>,
+    token_secret: Option<&str>,
 ) -> Result<serde_json::Value, crate::HyphaError> {
     let client = substrate::client::http_client(30).map_err(|e| {
         crate::HyphaError::new(
@@ -574,7 +578,7 @@ async fn fetch_taste_reports(
             format!("Failed to create HTTP client: {}", e),
         )
     })?;
-    substrate::client::fetch_taste_reports(&client, synapse_url, hash, fetch_opts(token))
+    substrate::client::fetch_taste_reports(&client, synapse_url, hash, fetch_opts(token_secret))
         .await
         .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))
 }
@@ -602,7 +606,7 @@ pub async fn handle_taste(
     )
     .await
     {
-        Ok(output) => out.ok(serde_json::to_value(output).unwrap_or_default()),
+        Ok(output) => out.ok(output),
         Err(e) => out.error_hypha(&e),
     }
 }

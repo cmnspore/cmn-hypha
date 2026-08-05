@@ -1,6 +1,6 @@
 [package]
 name = "cmn-hypha"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 description = "The reference CMN client CLI — release spores, query synapses, resolve bonds, and manage your local mycelium."
 license = "MIT"
@@ -18,9 +18,8 @@ name = "hypha"
 path = "src/main.rs"
 
 [dependencies]
-cmn-substrate = { version = "0.3", features = ["client-safe-dns", "archive-zstd"] }
-agent-first-data = "0.22.0"
-clap = { version = "4.6", features = ["derive"] }
+cmn-substrate = { version = "0.4", features = ["client-safe-dns", "archive-zstd"] }
+agent-first-data = "0.31.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 anyhow = "1.0"
@@ -39,6 +38,7 @@ unicode-normalization = "0.1"
 tempfile = "3.27"
 ignore = "0.4"  # gitignore-compatible file matching (from ripgrep)
 toml = "1.1"
+toml_edit = "0.25"
 fs2 = "0.4"
 subtle = "2"
 

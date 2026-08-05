@@ -13,6 +13,7 @@ fn test_version_json_output() {
     let output = env.hypha(&["--version", "--output", "json"]);
     let text = combined_text(&output);
     let json = parse_json_last_line(&text);
+    assert!(agent_first_data::validate_protocol_event(&json, true).is_ok());
     assert_eq!(
         json["kind"], "result",
         "version should output a result event: {}",
@@ -26,74 +27,97 @@ fn test_version_json_output() {
 }
 
 #[test]
-fn test_root_help_is_top_level_only() {
+fn test_root_help_lists_direct_discovery_commands() {
     let env = TestEnv::new();
     let output = env.hypha(&["--help"]);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "help should succeed: {}", stdout);
-    assert!(
-        stdout.contains("Commands:"),
-        "root help should list first-level commands: {}",
-        stdout
+    let text = combined_text(&output);
+    assert!(output.status.success(), "help should succeed: {}", text);
+    let json = parse_json_last_line(&text);
+    assert!(agent_first_data::validate_protocol_event(&json, true).is_ok());
+    assert_eq!(json["kind"], "result", "help should be a result: {}", text);
+    assert_eq!(
+        json["result"]["code"], "help",
+        "help should use the standard result code: {}",
+        text
     );
+    let help = &json["result"]["help"];
+    assert_eq!(help["schema"], "cli-help-v2", "bad help schema: {}", text);
+    assert_eq!(
+        help["command_path"], "hypha",
+        "root help should identify the selected command: {}",
+        text
+    );
+    let subcommands = help["subcommands"]
+        .as_array()
+        .expect("root help should list subcommands");
     assert!(
-        stdout.contains("  skill"),
+        subcommands
+            .iter()
+            .any(|command| command == "hypha skill --help"),
         "root help should include the skill command: {}",
-        stdout
+        text
     );
     assert!(
-        !stdout.contains("═"),
-        "root help should not recursively expand all commands: {}",
-        stdout
-    );
-    assert!(
-        !stdout.contains("URI types:"),
-        "root help should not include subcommand detail sections: {}",
-        stdout
+        subcommands.iter().all(serde_json::Value::is_string),
+        "help-v2 subcommands should be directly callable discovery commands: {}",
+        text
     );
 }
 
 #[test]
-fn test_recursive_help_is_recursive() {
+fn test_docs_render_the_whole_registry() {
     let env = TestEnv::new();
-    let output = env.hypha(&["--help", "--recursive"]);
+    let output = env.hypha(&["--docs"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "recursive help should succeed: {}",
-        stdout
+        "registry docs should succeed: {}",
+        stderr
     );
+    assert!(stderr.is_empty(), "docs should stay on stdout: {}", stderr);
     assert!(
-        stdout.contains("═"),
-        "recursive help should retain recursive command sections: {}",
-        stdout
-    );
-    assert!(
-        stdout.contains("URI types:"),
-        "recursive help should include subcommand detail sections: {}",
+        stdout.contains("hypha hatch bond set") && stdout.contains("hypha skill install"),
+        "docs should render nested commands from the whole registry: {}",
         stdout
     );
 }
 
 #[test]
-fn test_nested_help_is_single_layer() {
+fn test_nested_help_lists_direct_discovery_commands() {
     let env = TestEnv::new();
     let output = env.hypha(&["hatch", "--help"]);
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let text = combined_text(&output);
     assert!(
         output.status.success(),
         "hatch help should succeed: {}",
-        stdout
+        text
+    );
+    let json = parse_json_last_line(&text);
+    let help = &json["result"]["help"];
+    assert_eq!(help["schema"], "cli-help-v2", "bad help schema: {}", text);
+    assert_eq!(
+        help["command_path"], "hypha hatch",
+        "hatch help should identify its command path: {}",
+        text
+    );
+    let subcommands = help["subcommands"]
+        .as_array()
+        .expect("hatch help should list subcommands");
+    assert!(
+        subcommands
+            .iter()
+            .any(|command| command == "hypha hatch bond --help")
+            && subcommands
+                .iter()
+                .any(|command| command == "hypha hatch tree --help"),
+        "hatch help should list its direct child commands: {}",
+        text
     );
     assert!(
-        stdout.contains("Commands:"),
-        "hatch help should list direct child commands: {}",
-        stdout
-    );
-    assert!(
-        !stdout.contains("═") && !stdout.contains("Usage: set"),
-        "hatch help should not recursively expand grandchildren: {}",
-        stdout
+        subcommands.iter().all(serde_json::Value::is_string),
+        "help-v2 subcommands should be directly callable discovery commands: {}",
+        text
     );
 }
 
@@ -101,15 +125,48 @@ fn test_nested_help_is_single_layer() {
 fn test_help_subcommand_exits_success() {
     let env = TestEnv::new();
     let output = env.hypha(&["sense", "--help"]);
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let text = combined_text(&output);
     assert!(
         output.status.success(),
         "scoped help should succeed: {}",
+        text
+    );
+    let json = parse_json_last_line(&text);
+    assert_eq!(
+        json["result"]["code"], "help",
+        "scoped help should use the standard result code: {}",
+        text
+    );
+    let help = &json["result"]["help"];
+    assert_eq!(
+        help["command_path"], "hypha sense",
+        "scoped help should identify its command path: {}",
+        text
+    );
+    assert!(
+        help["shapes"]
+            .as_array()
+            .is_some_and(|shapes| shapes.iter().any(|shape| shape["usage"]
+                .as_str()
+                .is_some_and(|usage| usage.contains("<CMN_URL>")))),
+        "sense help should describe its URI argument: {}",
+        text
+    );
+}
+
+#[test]
+fn test_explicit_plain_help_is_conventional_text() {
+    let env = TestEnv::new();
+    let output = env.hypha(&["sense", "--help", "--output", "plain"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "explicit plain help should succeed: {}",
         combined_text(&output)
     );
     assert!(
-        stdout.contains("Usage:"),
-        "scoped help should print normal help: {}",
+        stdout.contains("hypha sense") && stdout.contains("<CMN_URL>"),
+        "plain help should render the registered invocation shape: {}",
         stdout
     );
 }
@@ -212,37 +269,220 @@ fn test_error_returns_json() {
 #[test]
 fn test_cli_parse_error_has_afdata_hint() {
     let env = TestEnv::new();
-    let output = env.hypha(&["--output", "xml", "sense", "cmn://cmn.dev"]);
-    let text = combined_text(&output);
+    let output = env.hypha(&["sense", "cmn://cmn.dev", "--output", "xml"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !output.status.success(),
         "parse error should fail: {}",
-        text
+        stderr
     );
-    let json = parse_json_last_line(&text);
-    assert_eq!(json["kind"], "error", "should be an error event: {}", text);
+    assert!(
+        stdout.is_empty(),
+        "split routing must keep CLI errors off stdout: {}",
+        stdout
+    );
+    let json = parse_json_last_line(&stderr);
+    assert!(agent_first_data::validate_protocol_event(&json, true).is_ok());
     assert_eq!(
-        json["error"]["code"], "invalid_request",
-        "should use standard CLI error shape: {}",
-        text
+        json["kind"], "error",
+        "should be an error event: {}",
+        stderr
+    );
+    assert_eq!(
+        json["error"]["code"], "cli_invalid_argument_value",
+        "should use the precise closed-world CLI error code: {}",
+        stderr
     );
     assert_eq!(
         json["error"]["retryable"], false,
         "should not be retryable: {}",
-        text
-    );
-    assert!(
-        json["trace"]["duration_ms"].is_number(),
-        "should include trace duration: {}",
-        text
+        stderr
     );
     assert!(
         json["error"]["hint"]
             .as_str()
             .is_some_and(|h| !h.is_empty()),
         "should include hint: {}",
-        text
+        stderr
     );
+}
+
+#[test]
+fn test_default_split_routes_result_and_diagnostics_separately() {
+    let env = TestEnv::new();
+    let output = env.hypha(&["config", "list", "--log", "startup"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "config list failed: {}", stderr);
+
+    let result = parse_json_last_line(&stdout);
+    assert_eq!(result["kind"], "result", "bad stdout: {}", stdout);
+    assert!(agent_first_data::validate_protocol_event(&result, true).is_ok());
+
+    let log = parse_json_last_line(&stderr);
+    assert_eq!(log["kind"], "log", "bad stderr: {}", stderr);
+    assert_eq!(log["log"]["level"], "info", "bad stderr: {}", stderr);
+    assert!(agent_first_data::validate_protocol_event(&log, true).is_ok());
+    assert!(
+        !stderr.contains("hypha_version") && !stderr.contains(env!("CARGO_PKG_VERSION")),
+        "startup logs must not eagerly disclose version metadata: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_output_to_stdout_collapses_error_stream() {
+    let env = TestEnv::new();
+    let output = env.hypha(&["sense", "invalid-uri", "--output-to", "stdout"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "invalid URI should fail");
+    assert!(
+        stderr.is_empty(),
+        "stdout routing must not write stderr: {}",
+        stderr
+    );
+    let event = parse_json_last_line(&stdout);
+    assert_eq!(event["kind"], "error", "bad stdout: {}", stdout);
+    assert!(agent_first_data::validate_protocol_event(&event, true).is_ok());
+}
+
+#[test]
+fn test_output_to_stderr_collapses_result_stream() {
+    let env = TestEnv::new();
+    let output = env.hypha(&["config", "list", "--output-to", "stderr"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "config list failed: {}", stderr);
+    assert!(
+        stdout.is_empty(),
+        "stderr routing must not write stdout: {}",
+        stdout
+    );
+    let event = parse_json_last_line(&stderr);
+    assert_eq!(event["kind"], "result", "bad stderr: {}", stderr);
+    assert!(agent_first_data::validate_protocol_event(&event, true).is_ok());
+}
+
+#[test]
+fn test_invalid_output_to_is_structured_cli_error() {
+    let env = TestEnv::new();
+    let output = env.hypha(&["config", "list", "--output-to", "sideways"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "invalid output target should fail"
+    );
+    assert!(stdout.is_empty(), "CLI error leaked to stdout: {}", stdout);
+    let event = parse_json_last_line(&stderr);
+    assert_eq!(
+        event["error"]["code"], "cli_invalid_argument_value",
+        "bad stderr: {}",
+        stderr
+    );
+    assert!(agent_first_data::validate_protocol_event(&event, true).is_ok());
+}
+
+#[test]
+fn test_startup_log_redacts_secret_arguments() {
+    let env = TestEnv::new();
+    let secret = "synapse-test-secret-value";
+    let output = env.hypha(&[
+        "taste",
+        "invalid-uri",
+        "--log",
+        "startup",
+        "--synapse-token-secret",
+        secret,
+    ]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "invalid URI should fail");
+    assert!(
+        !stderr.contains(secret),
+        "startup diagnostics exposed a secret: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("***"),
+        "startup diagnostics should include an AFDATA redaction marker: {}",
+        stderr
+    );
+    for line in stderr.lines() {
+        let event: serde_json::Value =
+            serde_json::from_str(line).expect("every diagnostic line must be JSON");
+        assert!(agent_first_data::validate_protocol_event(&event, true).is_ok());
+        if event["kind"] == "log" {
+            assert_eq!(event["log"]["args"]["cmn_url"], "invalid-uri");
+            assert!(
+                event["log"]["args"].get("uri").is_none(),
+                "Hypha startup diagnostics must use the AFDATA outer name: {}",
+                stderr
+            );
+        }
+    }
+}
+
+#[test]
+fn test_startup_log_redacts_synapse_url_selector() {
+    let env = TestEnv::new();
+    let password = "selector-password-canary";
+    let query_secret = "selector-query-canary";
+    let synapse = format!("https://user:{password}@127.0.0.1:1?token_secret={query_secret}");
+    let output = env.hypha(&["search", "probe", "--log", "startup", "--synapse", &synapse]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "credentialed URL should fail");
+    assert!(
+        !stderr.contains(password) && !stderr.contains(query_secret),
+        "startup diagnostics exposed URL credentials: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("***"),
+        "startup diagnostics should include an AFDATA redaction marker: {}",
+        stderr
+    );
+
+    let startup: serde_json::Value = serde_json::from_str(
+        stderr
+            .lines()
+            .find(|line| line.contains("\"event\":\"startup\""))
+            .expect("startup log must be present"),
+    )
+    .expect("startup log must be JSON");
+    assert_eq!(
+        startup["log"]["args"]["synapse_selector"],
+        "https://user:***@127.0.0.1:1?token_secret=***"
+    );
+    assert!(
+        startup["log"]["args"].get("synapse").is_none(),
+        "Hypha startup diagnostics must use the AFDATA selector name: {}",
+        stderr
+    );
+    assert!(agent_first_data::validate_protocol_event(&startup, true).is_ok());
+}
+
+#[test]
+fn test_short_help_is_structured_cli_error() {
+    let env = TestEnv::new();
+    let output = env.hypha(&["-h"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "short help should be rejected");
+    assert!(
+        stdout.is_empty(),
+        "short help leaked plain stdout: {}",
+        stdout
+    );
+    let event = parse_json_last_line(&stderr);
+    assert_eq!(event["kind"], "error", "bad stderr: {}", stderr);
+    assert_eq!(
+        event["error"]["code"], "cli_unknown_argument",
+        "bad stderr: {}",
+        stderr
+    );
+    assert!(agent_first_data::validate_protocol_event(&event, true).is_ok());
 }
 
 #[test]
@@ -528,7 +768,7 @@ fn test_taste_invalid_verdict() {
 
     let stderr = combined_text(&output);
     assert!(
-        stderr.contains("invalid value 'yummy' for '--verdict <VERDICT>'"),
+        stderr.contains("invalid value for `--verdict`"),
         "should explain invalid verdict value: {}",
         stderr
     );

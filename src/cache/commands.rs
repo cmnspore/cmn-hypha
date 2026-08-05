@@ -17,15 +17,15 @@ pub fn handle_list(out: &Output) -> ExitCode {
 
     if spores.is_empty() {
         let data = json!({
-            "count": 0,
+            "spore_count": 0,
             "spores": [],
-            "total_size": 0,
+            "total_size_bytes": 0,
         });
 
         return out.ok(data);
     }
 
-    let total_size: u64 = spores.iter().map(|s| s.size).sum();
+    let total_size_bytes: u64 = spores.iter().map(|s| s.size_bytes).sum();
 
     let spores_json: Vec<serde_json::Value> = spores
         .iter()
@@ -36,16 +36,16 @@ pub fn handle_list(out: &Output) -> ExitCode {
                 "name": s.name,
                 "synopsis": s.synopsis,
                 "path": s.path.display().to_string(),
-                "size": s.size,
+                "size_bytes": s.size_bytes,
                 "verdict": s.verdict,
             })
         })
         .collect();
 
     let data = json!({
-        "count": spores.len(),
+        "spore_count": spores.len(),
         "spores": spores_json,
-        "total_size": total_size,
+        "total_size_bytes": total_size_bytes,
     });
 
     out.ok(data)
@@ -62,7 +62,7 @@ pub fn handle_clean(out: &Output, all: bool) -> ExitCode {
         match cache.clean_all() {
             Ok(count) => {
                 let data = json!({
-                    "removed": count,
+                    "removed_count": count,
                 });
                 out.ok(data)
             }
@@ -110,7 +110,7 @@ pub fn handle_path(out: &Output, uri_str: &str) -> ExitCode {
     };
 
     let data = json!({
-        "uri": uri_str,
+        "cmn_url": uri_str,
         "path": display_path.display().to_string(),
     });
 

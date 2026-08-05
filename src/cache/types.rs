@@ -80,6 +80,6 @@ pub struct CachedSpore {
     pub name: String,
     pub synopsis: String,
     pub path: PathBuf,
-    pub size: u64,
+    pub size_bytes: u64,
     pub verdict: Option<substrate::TasteVerdict>,
 }

@@ -2,7 +2,7 @@
   "$schema": "https://cmn.dev/schemas/v1/spore-core.json",
   "id": "cmn-hypha",
   "name": "CMN Hypha",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "domain": "cmn.dev",
   "key": "ed25519.7BmCWmBb2YeUWR7pmHvwAvi9wRm96VpZsJvZFSTfc2Uu",
   "synopsis": "The reference CMN client CLI — release spores, query synapses, resolve bonds, and manage your local mycelium.",
@@ -12,20 +12,23 @@
   ],
   "license": "MIT",
   "mutations": [
-    "Enrich `hypha --version` output with a human-readable display name (\"CMN Hypha\") and the short git commit SHA the binary was built from — a build script stamps both at compile time, and the SHA falls back to \"unknown\" for crates.io tarball builds where no .git is reachable",
-    "Let agents auto-invoke the bundled cmn-hypha skill by dropping its disable-model-invocation gate, so the skill is discoverable and usable without an explicit user trigger",
-    "Track agent-first-data 0.22.0, adopting its revised CLI version helper and skill-spec (assets) APIs"
+    "Rebuild the command-line boundary on agent-first-data's closed-world CLI registry — every executable argument combination is registered up front, help is emitted as cli-help-v2, and docs/cli.md is rendered by the binary itself via --docs; clap is gone. Unregistered argument mixtures fail before any config, filesystem, network, or domain I/O, and repeatable options such as --exclude-names bind one value per occurrence where clap accepted a variadic list",
+    "Own the whole command lifecycle with a single AFDATA emitter on a dedicated writer thread, so protocol ordering, stream routing, and the single-terminal-event rule hold across the thread-safe EventSink trait",
+    "Redact credential-bearing values before they reach protocol events — scrub scheme-prefixed URLs embedded in diagnostic prose, and secret-named fields inside embedded CMN documents",
+    "Edit hypha config through the agent-first-data document API so unrelated file content and formatting survive a write, and report load and parse failures as structured errors",
+    "Accept nutrient fields the mycelium model does not name — mycelium nutrient add --with stores unrecognized keys as parsed JSON, so a spec-valid BOLT12 offer or a new payment network needs no hypha release",
+    "Track agent-first-data 0.31.0 and cmn-substrate 0.4.0"
   ],
   "bonds": [
     {
       "relation": "depends_on",
-      "uri": "cmn://cmn.dev/b3.HBb3K4QRKMdNUhRYFZXiHf7uAN4zRpQMvgR9XFWzH7LP",
+      "uri": "cmn://cmn.dev/b3.AfcKgjH6e2nDWfoFPhSxEeEqhA9K8RY2jQN9SoE7PCN5",
       "id": "cmn-spec",
       "reason": "Implements the CMN protocol specification — reference client CLI"
     },
     {
       "relation": "depends_on",
-      "uri": "cmn://agentfirstkit.com/b3.eDai9QqMqX9gR8Fayep7D2HiWCtLd4EW8o8UtwDgCaQ",
+      "uri": "cmn://agentfirstkit.com/b3.7Kf6i6HNpFxooXKQTCzfugkqq89rPCuM1mekg8hsKAQC",
       "id": "agent-first-data",
       "reason": "All CLI output and protocol fields use Agent-First Data suffix conventions"
     }

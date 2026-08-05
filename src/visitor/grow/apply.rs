@@ -269,7 +269,8 @@ pub(super) async fn pull_from_archive_lib(
             if let Err(e) =
                 download_file(&resolved_url, &archive_path, cache.spore_max_download_bytes).await
             {
-                last_error = format!("{}: {}", resolved_url, e);
+                let safe_url = agent_first_data::redact_url_secrets(&resolved_url);
+                last_error = format!("{}: {}", safe_url, e);
                 continue;
             }
 
@@ -291,14 +292,15 @@ pub(super) async fn pull_from_archive_lib(
                     ));
                 }
                 Err(e) if e.is_malicious() => {
+                    let safe_url = agent_first_data::redact_url_secrets(&resolved_url);
                     last_error = format!(
                         "{} (format {:?}): unverified content rejected: {}",
-                        resolved_url, archive_ep.format, e
+                        safe_url, archive_ep.format, e
                     );
                 }
                 Err(e) => {
-                    last_error =
-                        format!("{} (format {:?}): {}", resolved_url, archive_ep.format, e);
+                    let safe_url = agent_first_data::redact_url_secrets(&resolved_url);
+                    last_error = format!("{} (format {:?}): {}", safe_url, archive_ep.format, e);
                 }
             }
         }

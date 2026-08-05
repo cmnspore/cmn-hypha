@@ -100,8 +100,15 @@ fn test_taste_all_verdicts_accepted() {
     ]);
     assert!(!output.status.success(), "'delicious' should be rejected");
     let stderr = combined_text(&output);
-    assert!(stderr.contains("invalid value 'delicious' for '--verdict <VERDICT>'"));
+    let event = parse_json_last_line(&stderr);
+    assert_eq!(event["error"]["code"], "cli_invalid_argument_value");
+    assert!(stderr.contains("invalid value for `--verdict`"));
     assert!(stderr.contains("sweet, fresh, safe, rotten, toxic"));
+    assert!(
+        !stderr.contains("delicious"),
+        "closed-world parser errors must not echo raw values: {}",
+        stderr
+    );
 }
 
 #[test]

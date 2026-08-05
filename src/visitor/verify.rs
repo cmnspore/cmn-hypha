@@ -85,9 +85,9 @@ pub(super) fn can_synapse_fallback(
 pub(super) fn resolve_default_synapse_url(
     cfg: &crate::config::HyphaConfig,
 ) -> Option<(String, Option<String>)> {
-    let synapse_domain = cfg.defaults.synapse.as_deref()?;
+    let synapse_domain = cfg.defaults.synapse_domain.as_deref()?;
     let resolved = crate::config::resolve_synapse(Some(synapse_domain), None).ok()?;
-    Some((resolved.url, resolved.token_secret))
+    Some((resolved.synapse_url, resolved.token_secret))
 }
 
 /// Fetch a spore manifest with default Synapse fallback, then verify it with
@@ -105,7 +105,7 @@ pub(crate) async fn fetch_verified_spore(
     let (manifest, from_synapse) = match fetch_spore_manifest(capsule, hash).await {
         Ok(manifest) => (manifest, false),
         Err(domain_err) if can_synapse_fallback(domain_cache, public_key, &cfg.cache) => {
-            if let Some((synapse_url, synapse_token)) = resolve_default_synapse_url(&cfg) {
+            if let Some((synapse_url, synapse_token_secret)) = resolve_default_synapse_url(&cfg) {
                 sink.emit(crate::HyphaEvent::Warn {
                     message: format!(
                         "Domain unreachable for spore manifest, trying synapse: {}",
@@ -119,7 +119,7 @@ pub(crate) async fn fetch_verified_spore(
                     &client,
                     &synapse_url,
                     hash,
-                    fetch_opts(synapse_token.as_deref()),
+                    fetch_opts(synapse_token_secret.as_deref()),
                 )
                 .await
                 .map_err(|e| {
@@ -142,9 +142,9 @@ pub(crate) async fn fetch_verified_spore(
     let key_trust_synapse_witness_mode = cfg.cache.key_trust_synapse_witness_mode;
     let resolved_synapse = resolve_default_synapse_url(&cfg);
     let synapse_url = resolved_synapse.as_ref().map(|(url, _)| url.as_str());
-    let synapse_token = resolved_synapse
+    let synapse_token_secret = resolved_synapse
         .as_ref()
-        .and_then(|(_, token)| token.as_deref());
+        .and_then(|(_, token_secret)| token_secret.as_deref());
 
     verify_spore_with_key_trust(
         sink,
@@ -158,7 +158,7 @@ pub(crate) async fn fetch_verified_spore(
         key_trust_synapse_witness_mode,
         from_synapse,
         synapse_url,
-        synapse_token,
+        synapse_token_secret,
     )
     .await?;
 

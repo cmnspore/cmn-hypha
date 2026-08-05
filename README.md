@@ -151,12 +151,15 @@ hypha cache path <URI>                 # Show cache path
 
 ## Output Format
 
-Default is JSON (for AI agents). Hypha writes a stdout JSONL event stream (startup/progress/final result). Use `--output plain` or `--output yaml` for human-readable output. Formatting is handled by `agent-first-data` (`output_json` / `output_plain` / `output_yaml`).
+Default output is Agent-First Data JSON. With the default `--output-to split`, the final `result` goes to stdout while `error`, `progress`, and `log` events go to stderr, so a shell capture cannot mistake diagnostics for result data. Use `--output-to stdout` or `--output-to stderr` when a consumer needs one ordered event stream and branches on `kind`. Use `--output plain` or `--output yaml` to change rendering without changing event routing.
 
 ```bash
 # JSON (default)
 hypha mycelium status cmn.dev
 # {"kind":"result","result":{...},"trace":{...}}
+
+# One ordered JSONL stream on stdout
+hypha --output-to stdout --log startup mycelium status cmn.dev
 
 # Plain (same data, rendered as logfmt key-value pairs)
 hypha -o plain mycelium status cmn.dev
@@ -183,16 +186,15 @@ rm -rf /tmp/cmn-test && unset CMN_HOME
 
 ## Documentation
 
-Regenerate the CLI reference with the project entrypoint (it prepends the
-`docs/cli.md` header, then appends `hypha --help --recursive --output markdown`):
+The closed CLI registry renders the complete reference, including its header:
 
 ```bash
-scripts/projects.sh docs cmn-hypha
-scripts/projects.sh docs cmn-hypha --dry-run
+cargo run -- --docs > docs/cli.md
+git diff --exit-code -- docs/cli.md
 ```
 
-> Running the bare `hypha --help --recursive --output markdown` only prints the
-> body — use the project entrypoint so the header stays in sync.
+Use `hypha --help` or `hypha <command> --help` for one `cli-help-v2` discovery
+response; use `hypha --docs` when an agent needs the whole registry.
 
 | Document | Description |
 |----------|-------------|

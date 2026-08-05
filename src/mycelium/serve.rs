@@ -7,16 +7,32 @@ use crate::site::{self, SiteDir};
 
 const JSON_FETCH_MAX_BYTES: usize = 8 * 1024 * 1024;
 
-fn sanitize_log_text(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        if ch.is_control() {
-            out.extend(ch.escape_default());
+fn log_request(
+    out: &Output,
+    level: &str,
+    event: &str,
+    message: &str,
+    base_url: &str,
+    request_path: &str,
+) {
+    let request_url = format!(
+        "{}{}{}",
+        base_url,
+        if request_path.starts_with('/') {
+            ""
         } else {
-            out.push(ch);
-        }
-    }
-    out
+            "/"
+        },
+        request_path
+    );
+    out.log_data(
+        level,
+        event,
+        message,
+        json!({
+            "request_url": request_url,
+        }),
+    );
 }
 
 pub async fn handle_pulse(
@@ -57,22 +73,22 @@ pub async fn handle_pulse(
         .unwrap_or(file_path)
         .to_string();
 
-    let base_url = resolved.url.trim_end_matches('/');
+    let base_url = resolved.synapse_url.trim_end_matches('/');
 
     let client = match substrate::client::http_client(30) {
         Ok(c) => c,
         Err(e) => return out.error("NETWORK_ERR", &format!("HTTP client error: {}", e)),
     };
     let opts = match &resolved.token_secret {
-        Some(token) => substrate::client::FetchOptions::with_bearer_token(token)
+        Some(token_secret) => substrate::client::FetchOptions::with_bearer_token(token_secret)
             .max_bytes(JSON_FETCH_MAX_BYTES),
         None => substrate::client::FetchOptions::with_max_bytes(JSON_FETCH_MAX_BYTES),
     };
 
     match substrate::client::post_synapse_pulse(&client, base_url, &payload, opts).await {
         Ok(body) => out.ok(json!({
-            "uri": uri,
-            "synapse": base_url,
+            "cmn_url": uri,
+            "synapse_url": base_url,
             "response": body,
         })),
         Err(e) => out.error("synapse_error", &e.to_string()),
@@ -151,7 +167,11 @@ pub fn handle_serve(
     let archive_urls: Vec<_> = ep
         .iter()
         .filter(|endpoint| endpoint.kind == "archive")
-        .map(|endpoint| endpoint.url.clone())
+        .map(|endpoint| {
+            json!({
+                "archive_url": endpoint.url,
+            })
+        })
         .collect();
     let data = json!({
         "status": "running",
@@ -160,16 +180,16 @@ pub fn handle_serve(
         "listen_addr": format!("127.0.0.1:{}", port),
         "base_url": base_url,
         "endpoints": {
-            "cmn": format!("{}/.well-known/cmn.json", base_url),
-            "mycelium": mycelium_url,
-            "spore": spore_url,
-            "archive": archive_urls,
+            "cmn_url": format!("{}/.well-known/cmn.json", base_url),
+            "mycelium_url": mycelium_url,
+            "spore_url": spore_url,
+            "archives": archive_urls,
         }
     });
 
-    // Output startup info (both modes use out.ok for consistent formatting)
-    // Note: ok() returns ExitCode but we continue serving, so ignore it
-    let _ = out.ok(&data);
+    // A server-start event is non-terminal; the terminal result is emitted only
+    // if the request iterator later shuts down.
+    out.log_data("info", "server_started", "Mycelium server started", data);
 
     // Canonical public root used to verify that every served file is actually
     // inside public/ (defeats symlink escapes that a lexical check would miss).
@@ -178,13 +198,16 @@ pub fn handle_serve(
     // Serve requests
     for request in server.incoming_requests() {
         let request_url = request.url().to_string();
-        let request_url_log = sanitize_log_text(&request_url);
         let file_path = match resolve_public_file_path(&public_dir, &request_url) {
             Some(path) => path,
             None => {
-                out.warn(
-                    "HTTP_FORBIDDEN",
-                    &format!("GET {} (invalid path)", request_url_log),
+                log_request(
+                    out,
+                    "warn",
+                    "http_forbidden",
+                    "HTTP request path is invalid",
+                    &base_url,
+                    &request_url,
                 );
                 let response = Response::from_string("Forbidden").with_status_code(403);
                 let _ = request.respond(response);
@@ -192,18 +215,18 @@ pub fn handle_serve(
             }
         };
 
-        let url_path = request_url
-            .split('?')
-            .next()
-            .unwrap_or_default()
-            .trim_start_matches('/');
-        let url_path_log = sanitize_log_text(url_path);
-
         // Resolve symlinks before serving; a missing target → 404.
         let canonical = match std::fs::canonicalize(&file_path) {
             Ok(c) => c,
             Err(_) => {
-                out.warn("HTTP_NOT_FOUND", &format!("GET /{}", url_path_log));
+                log_request(
+                    out,
+                    "warn",
+                    "http_not_found",
+                    "HTTP request target was not found",
+                    &base_url,
+                    &request_url,
+                );
                 let response = Response::from_string("Not Found").with_status_code(404);
                 let _ = request.respond(response);
                 continue;
@@ -211,9 +234,13 @@ pub fn handle_serve(
         };
 
         if !canonical.starts_with(&canonical_public) {
-            out.warn(
-                "HTTP_FORBIDDEN",
-                &format!("GET {} (path escape)", request_url_log),
+            log_request(
+                out,
+                "warn",
+                "http_forbidden",
+                "HTTP request attempted a path escape",
+                &base_url,
+                &request_url,
             );
             let response = Response::from_string("Forbidden").with_status_code(403);
             let _ = request.respond(response);
@@ -221,7 +248,14 @@ pub fn handle_serve(
         }
 
         if !canonical.is_file() {
-            out.warn("HTTP_NOT_FOUND", &format!("GET /{}", url_path_log));
+            log_request(
+                out,
+                "warn",
+                "http_not_found",
+                "HTTP request target was not a file",
+                &base_url,
+                &request_url,
+            );
             let response = Response::from_string("Not Found").with_status_code(404);
             let _ = request.respond(response);
             continue;
@@ -248,18 +282,35 @@ pub fn handle_serve(
                     response = response.with_header(h);
                 }
 
-                out.warn("HTTP_OK", &format!("GET /{}", url_path_log));
+                log_request(
+                    out,
+                    "info",
+                    "http_ok",
+                    "HTTP request served",
+                    &base_url,
+                    &request_url,
+                );
                 let _ = request.respond(response);
             }
             Err(_) => {
-                out.warn("HTTP_NOT_FOUND", &format!("GET /{}", url_path_log));
+                log_request(
+                    out,
+                    "warn",
+                    "http_not_found",
+                    "HTTP request target could not be opened",
+                    &base_url,
+                    &request_url,
+                );
                 let response = Response::from_string("Not Found").with_status_code(404);
                 let _ = request.respond(response);
             }
         }
     }
 
-    ExitCode::SUCCESS
+    out.ok(json!({
+        "status": "stopped",
+        "base_url": base_url,
+    }))
 }
 
 #[cfg(test)]
@@ -268,22 +319,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sanitize_log_text_leaves_normal_paths_unchanged() {
-        assert_eq!(
-            sanitize_log_text("/archive/b3.hash.tar.zst?download=1"),
-            "/archive/b3.hash.tar.zst?download=1"
+    fn request_url_field_redacts_secret_query_values() {
+        let event = agent_first_data::json_log(json!({
+            "level": "info",
+            "message": "request",
+            "request_url": "http://127.0.0.1/spore?token_secret=canary",
+        }))
+        .build()
+        .into_value();
+        let rendered = agent_first_data::render(
+            &event,
+            agent_first_data::OutputFormat::Json,
+            &agent_first_data::OutputOptions::default(),
         );
-    }
-
-    #[test]
-    fn sanitize_log_text_escapes_control_characters() {
-        let sanitized = sanitize_log_text("/ok\x1b[31m\nnext");
-        assert!(
-            !sanitized.chars().any(char::is_control),
-            "sanitized log text still has controls: {:?}",
-            sanitized
-        );
-        assert!(sanitized.contains("\\u{1b}"));
-        assert!(sanitized.contains("\\n"));
+        assert!(!rendered.contains("canary"));
+        assert!(rendered.contains("***"));
     }
 }

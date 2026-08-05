@@ -19,7 +19,7 @@ fn reset_dir(dir: &std::path::Path) -> Result<(), crate::HyphaError> {
 pub(super) struct BondIndexEntry {
     hash: String,
     dir: String,
-    uri: String,
+    cmn_url: String,
     relation: substrate::BondRelation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     id: Option<String>,
@@ -55,7 +55,7 @@ pub async fn handle_bond_fetch(out: &Output, clean: bool, status: bool) -> ExitC
     };
     let sink = crate::api::OutSink(out);
     match bond_in_dir(&cwd, clean, status, &sink).await {
-        Ok(output) => out.ok(serde_json::to_value(output).unwrap_or_default()),
+        Ok(output) => out.ok(output),
         Err(e) => out.error_hypha(&e),
     }
 }
@@ -132,7 +132,7 @@ pub(super) async fn bond_in_dir(
         for (uri_str, _domain, hash, relation, _id) in &spore_refs {
             let bonded = index.iter().any(|entry| entry.hash == *hash);
             statuses.push(crate::output::BondStatusRef {
-                uri: uri_str.clone(),
+                cmn_url: uri_str.clone(),
                 relation: relation.clone(),
                 bonded: json!(bonded),
             });
@@ -141,7 +141,7 @@ pub(super) async fn bond_in_dir(
             let relation = reference.relation.clone();
             if relation.is_excluded_from_bond_fetch() {
                 statuses.push(crate::output::BondStatusRef {
-                    uri: reference.uri.clone(),
+                    cmn_url: reference.uri.clone(),
                     relation,
                     bonded: json!("excluded"),
                 });
@@ -238,7 +238,7 @@ pub(super) async fn bond_in_dir(
                 Some(t) => t.verdict.to_string(),
             };
             taste_refs.push(crate::output::BondTasteRef {
-                uri: uri_str.clone(),
+                cmn_url: uri_str.clone(),
                 relation: relation.clone(),
                 id: id.clone(),
                 taste: taste_status,
@@ -279,13 +279,13 @@ pub(super) async fn bond_in_dir(
             index_entries.push(BondIndexEntry {
                 hash: hash.clone(),
                 dir: dir_name,
-                uri: uri_str.clone(),
+                cmn_url: uri_str.clone(),
                 relation: relation.clone(),
                 id: id.clone(),
                 name: None,
             });
             bonded.push(crate::output::BondedRef {
-                uri: uri_str.clone(),
+                cmn_url: uri_str.clone(),
                 relation: relation.clone(),
                 status: "already_bonded".to_string(),
             });
@@ -347,8 +347,9 @@ pub(super) async fn bond_in_dir(
                             break;
                         }
                         Err(e) => {
+                            let safe_url = agent_first_data::redact_url_secrets(&archive_url);
                             sink.emit(crate::HyphaEvent::Warn {
-                                message: format!("Failed to download from {}: {}", archive_url, e),
+                                message: format!("Failed to download from {}: {}", safe_url, e),
                             });
                         }
                     }
@@ -366,8 +367,9 @@ pub(super) async fn bond_in_dir(
                         break;
                     }
                     Err(e) => {
+                        let safe_url = agent_first_data::redact_url_secrets(git_url);
                         sink.emit(crate::HyphaEvent::Warn {
-                            message: format!("Failed to clone from {}: {}", git_url, e),
+                            message: format!("Failed to clone from {}: {}", safe_url, e),
                         });
                     }
                 }
@@ -388,14 +390,14 @@ pub(super) async fn bond_in_dir(
         index_entries.push(BondIndexEntry {
             hash: hash.clone(),
             dir: dir_name,
-            uri: uri_str.clone(),
+            cmn_url: uri_str.clone(),
             relation: relation.clone(),
             id: id.clone(),
             name: Some(name.to_string()),
         });
 
         bonded.push(crate::output::BondedRef {
-            uri: uri_str.clone(),
+            cmn_url: uri_str.clone(),
             relation: relation.clone(),
             status: "bonded".to_string(),
         });

@@ -6,7 +6,7 @@ Reference for error codes and messages in CMN tools.
 
 ### Pipeline Error Codes
 
-These codes correspond to stages in the visitor resolution pipeline (sense/taste/spawn/grow/absorb). Each error includes a `trace` field in the final JSON event showing how far the operation progressed before failure.
+These codes correspond to stages in the visitor resolution pipeline (sense/taste/spawn/grow/absorb). Each error is a strict AFDATA event with a `trace.duration_ms` field.
 
 | Code | Stage | Cause | Resolution |
 |------|-------|-------|------------|
@@ -55,21 +55,7 @@ These codes correspond to stages in the visitor resolution pipeline (sense/taste
 
 ### Runtime Diagnostic Codes
 
-Non-fatal diagnostic events emitted during operations. These use the same Agent-First Data protocol structure and are written to the runtime stdout event stream.
-
-| Code | Context | Meaning |
-|------|---------|---------|
-| `CACHE_WARN` | capsule/mycelium cache | Cache write failed (operation continues) |
-| `DOWNLOAD_FAILED` | taste/absorb | HTTPS download failed, trying next dist source |
-| `CLONE_FAILED` | taste/absorb | Git clone failed, trying next dist source |
-| `TASTE_DEP` | taste --with-deps | Fetching a dependency |
-| `SAVE_WARN` | spawn/grow | Failed to save .cmn/spawned-from/spore.json |
-| `ABSORB_DISCOVER` | absorb --discover | Number of sources discovered from lineage |
-| `ABSORB_FETCH` | absorb | Fetching a source for absorption |
-| `SIG_VERIFIED` | absorb | Signature verification succeeded |
-| `HTTP_OK` | mycelium serve | Successful HTTP request |
-| `HTTP_ERROR` | mycelium serve | HTTP 500 response |
-| `HTTP_NOT_FOUND` | mycelium serve | HTTP 404 response |
+Non-fatal diagnostics are strict AFDATA `log` or `progress` events. With the default `--output-to split` routing they go to stderr; `--output-to stdout` or `--output-to stderr` can collapse all event kinds onto one ordered stream. Stable service log events use lowercase names such as `startup`, `server_started`, `http_ok`, `http_forbidden`, and `http_not_found`; generic library warnings use `event: "warn"`.
 
 ## Synapse Errors
 
@@ -110,7 +96,7 @@ The nested `error.code` field contains the specific error code. Parse `error.cod
 {
   "kind": "error",
   "error": {
-    "code": "SIG_FAILED",
+    "code": "sig_failed",
     "message": "Core signature verification failed: invalid signature",
     "retryable": false,
     "hint": "read the error field, check hypha --help for the expected input, and retry"
@@ -145,7 +131,7 @@ The nested `error.code` field contains the specific error code. Parse `error.cod
   "kind": "result",
   "result": { "spore": { "..." : "..." } },
   "trace": {
-    "uri": "cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2",
+    "cmn_url": "cmn://cmn.dev/b3.3yMR7vZQ9hL2xKJdFtN8wPcB6sY1mXgU4eH5pTa2",
     "cmn": { "resolved": true, "cached": true, "public_key": "ed25519.5XmkQ9vZP8nL3xJdFtR7wNcA6sY2bKgU1eH9pXb4" },
     "verified": { "core_signature": true, "capsule_signature": true }
   }

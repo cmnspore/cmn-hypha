@@ -12,7 +12,7 @@ pub fn handle_list(out: &Output) -> ExitCode {
         Ok(config) => config,
         Err(e) => return out.error_hypha(&e),
     };
-    let default_domain = config.defaults.synapse.as_deref();
+    let default_domain = config.defaults.synapse_domain.as_deref();
     let domains = config::list_synapse_domains();
 
     let nodes: Vec<serde_json::Value> = domains
@@ -21,17 +21,17 @@ pub fn handle_list(out: &Output) -> ExitCode {
             let node = config::load_synapse_node(domain)?;
             Some(json!({
                 "domain": domain,
-                "url": node.url,
+                "synapse_url": node.synapse_url,
                 "has_token": node.token_secret.is_some(),
-                "default": Some(domain.as_str()) == default_domain,
+                "is_default": Some(domain.as_str()) == default_domain,
             }))
         })
         .collect();
 
     out.ok(json!({
-        "count": nodes.len(),
+        "node_count": nodes.len(),
         "nodes": nodes,
-        "default": default_domain,
+        "default_domain": default_domain,
     }))
 }
 
@@ -46,7 +46,7 @@ pub async fn handle_info(
         Err(e) => return out.error_hypha(&e),
     };
 
-    let url = format!("{}/health", resolved.url.trim_end_matches('/'));
+    let url = format!("{}/health", resolved.synapse_url.trim_end_matches('/'));
 
     let client = match substrate::client::http_client(30) {
         Ok(c) => c,
@@ -54,8 +54,8 @@ pub async fn handle_info(
     };
 
     let mut req = client.get(&url);
-    if let Some(ref token) = resolved.token_secret {
-        req = req.header("Authorization", format!("Bearer {}", token));
+    if let Some(ref token_secret) = resolved.token_secret {
+        req = req.header("Authorization", format!("Bearer {}", token_secret));
     }
 
     let response = match req.send().await {
@@ -84,7 +84,7 @@ pub async fn handle_info(
         };
 
     // Cache health.json to the node directory
-    if let Ok(domain) = config::domain_from_url(&resolved.url) {
+    if let Ok(domain) = config::domain_from_url(&resolved.synapse_url) {
         let info_path = config::synapse_node_dir(&domain).join("health.json");
         if let Ok(json_str) = serde_json::to_string_pretty(&health) {
             let _ = std::fs::write(&info_path, json_str);
@@ -92,7 +92,7 @@ pub async fn handle_info(
     }
 
     out.ok(json!({
-        "synapse": resolved.url,
+        "synapse_url": resolved.synapse_url,
         "health": health,
     }))
 }
@@ -109,7 +109,7 @@ pub fn handle_add(out: &Output, url: &str) -> ExitCode {
     };
 
     let node = SynapseNode {
-        url: url.to_string(),
+        synapse_url: url.to_string(),
         token_secret: None,
     };
 
@@ -123,8 +123,8 @@ pub fn handle_add(out: &Output, url: &str) -> ExitCode {
         Ok(config) => config,
         Err(e) => return out.error_hypha(&e),
     };
-    if domains.len() == 1 && config.defaults.synapse.is_none() {
-        config.defaults.synapse = Some(domain.clone());
+    if domains.len() == 1 && config.defaults.synapse_domain.is_none() {
+        config.defaults.synapse_domain = Some(domain.clone());
         if let Err(e) = config.save() {
             return out.error_hypha(&e);
         }
@@ -132,8 +132,8 @@ pub fn handle_add(out: &Output, url: &str) -> ExitCode {
 
     out.ok(json!({
         "domain": domain,
-        "url": url,
-        "default": config.defaults.synapse.as_deref() == Some(domain.as_str()),
+        "synapse_url": url,
+        "is_default": config.defaults.synapse_domain.as_deref() == Some(domain.as_str()),
     }))
 }
 
@@ -152,15 +152,15 @@ pub fn handle_remove(out: &Output, domain: &str) -> ExitCode {
         Ok(cfg) => cfg,
         Err(e) => return out.error_hypha(&e),
     };
-    if cfg.defaults.synapse.as_deref() == Some(domain) {
-        cfg.defaults.synapse = None;
+    if cfg.defaults.synapse_domain.as_deref() == Some(domain) {
+        cfg.defaults.synapse_domain = None;
         if let Err(e) = cfg.save() {
             return out.error_hypha(&e);
         }
     }
 
     out.ok(json!({
-        "removed": domain,
+        "removed_domain": domain,
     }))
 }
 
@@ -181,15 +181,15 @@ pub fn handle_use(out: &Output, domain: &str) -> ExitCode {
         Ok(cfg) => cfg,
         Err(e) => return out.error_hypha(&e),
     };
-    cfg.defaults.synapse = Some(domain.to_string());
+    cfg.defaults.synapse_domain = Some(domain.to_string());
 
     if let Err(e) = cfg.save() {
         return out.error_hypha(&e);
     }
 
     out.ok(json!({
-        "default": domain,
-        "url": node.url,
+        "default_domain": domain,
+        "synapse_url": node.synapse_url,
     }))
 }
 
@@ -221,7 +221,7 @@ pub fn handle_config(out: &Output, domain: &str, token_secret: Option<&str>) -> 
 
     out.ok(json!({
         "domain": domain,
-        "token_set": node.token_secret.is_some(),
+        "has_token": node.token_secret.is_some(),
     }))
 }
 
@@ -248,9 +248,9 @@ pub async fn handle_discover(
         None => substrate::client::FetchOptions::with_max_bytes(JSON_FETCH_MAX_BYTES),
     };
 
-    let results = match substrate::client::search(
+    let response = match substrate::client::search(
         &client,
-        &resolved.url,
+        &resolved.synapse_url,
         "",
         None,
         None,
@@ -260,12 +260,27 @@ pub async fn handle_discover(
     )
     .await
     {
-        Ok(r) => serde_json::to_value(r.result.spores).unwrap_or_default(),
+        Ok(response) => response,
         Err(e) => return out.error("synapse_error", &e.to_string()),
     };
+    let results: Vec<crate::output::SearchResult> = response
+        .result
+        .spores
+        .iter()
+        .map(|result| crate::output::SearchResult {
+            cmn_url: result.uri.clone(),
+            domain: result.domain.clone(),
+            name: result.name.clone(),
+            synopsis: result.synopsis.clone(),
+            license: result.license.clone(),
+            intent: result.intent.clone(),
+            relevance: result.relevance,
+        })
+        .collect();
 
     out.ok(json!({
-        "synapse": resolved.url,
+        "synapse_url": resolved.synapse_url,
+        "result_count": results.len(),
         "results": results,
     }))
 }

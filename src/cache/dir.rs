@@ -134,7 +134,7 @@ impl CacheDir {
                             }
                         };
 
-                        let size = dir_size(&hash_path);
+                        let size_bytes = dir_size(&hash_path);
 
                         spores.push(CachedSpore {
                             domain: domain.clone(),
@@ -142,7 +142,7 @@ impl CacheDir {
                             name,
                             synopsis,
                             path: hash_path,
-                            size,
+                            size_bytes,
                             verdict,
                         });
                     }

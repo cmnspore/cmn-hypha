@@ -4,7 +4,7 @@ use crate::api::Output;
 
 use super::{config_path, HyphaConfig, KeyTrustRefreshMode, SynapseWitnessMode};
 
-const VALID_KEYS: &str = "cache.path, cache.cmn_ttl_s, cache.key_trust_ttl_s, cache.key_trust_refresh_mode, cache.key_trust_synapse_witness_mode, cache.spore_max_download_bytes, cache.spore_max_extract_bytes, cache.spore_max_extract_files, cache.spore_max_extract_file_bytes, cache.spore_reject_path_components, cache.clock_skew_tolerance_s, cache.require_domain_first_key, defaults.synapse, defaults.domain, defaults.taste.synapse, defaults.taste.domain";
+const VALID_KEYS: &str = "cache.path, cache.cmn_ttl_s, cache.key_trust_ttl_s, cache.key_trust_refresh_mode, cache.key_trust_synapse_witness_mode, cache.spore_max_download_bytes, cache.spore_max_extract_bytes, cache.spore_max_extract_files, cache.spore_max_extract_file_bytes, cache.spore_reject_path_components, cache.clock_skew_tolerance_s, cache.require_domain_first_key, defaults.synapse_domain, defaults.domain, defaults.taste.synapse_domain, defaults.taste.domain";
 
 /// Handle `hypha config list`
 pub fn handle_list(out: &Output) -> ExitCode {
@@ -13,11 +13,20 @@ pub fn handle_list(out: &Output) -> ExitCode {
         Err(e) => return out.error_hypha(&e),
     };
     let path = config_path();
+    let config = match serde_json::to_value(&cfg) {
+        Ok(config) => config,
+        Err(err) => {
+            return out.error(
+                "serialize_error",
+                &format!("Failed to serialize Hypha configuration: {err}"),
+            )
+        }
+    };
 
     let data = serde_json::json!({
         "path": path.display().to_string(),
         "exists": path.exists(),
-        "config": serde_json::to_value(&cfg).unwrap_or_default(),
+        "config": config,
     });
 
     out.ok(data)
@@ -109,9 +118,11 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
                 )
             }
         },
-        "defaults.synapse" => cfg.defaults.synapse = Some(value.to_string()),
+        "defaults.synapse_domain" => cfg.defaults.synapse_domain = Some(value.to_string()),
         "defaults.domain" => cfg.defaults.domain = Some(value.to_string()),
-        "defaults.taste.synapse" => cfg.defaults.taste.synapse = Some(value.to_string()),
+        "defaults.taste.synapse_domain" => {
+            cfg.defaults.taste.synapse_domain = Some(value.to_string())
+        }
         "defaults.taste.domain" => cfg.defaults.taste.domain = Some(value.to_string()),
         _ => {
             return out.error(
@@ -121,10 +132,25 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
         }
     }
 
+    let config_value = match serde_json::to_value(&cfg) {
+        Ok(value) => value,
+        Err(error) => {
+            return out.error(
+                "serialize_error",
+                &format!("Failed to serialize updated configuration: {error}"),
+            )
+        }
+    };
+    let pointer = format!("/{}", key.replace('.', "/"));
+    let stored_value = config_value
+        .pointer(&pointer)
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
     match cfg.save() {
         Ok(()) => out.ok(serde_json::json!({
             "key": key,
-            "value": value,
+            "value": stored_value,
         })),
         Err(e) => out.error_hypha(&e),
     }

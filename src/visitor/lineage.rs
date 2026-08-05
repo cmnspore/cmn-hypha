@@ -62,7 +62,7 @@ async fn lineage_direction(
 
     let bonds = substrate::client::fetch_lineage(
         &client,
-        &resolved.url,
+        &resolved.synapse_url,
         hash,
         direction,
         max_depth,
@@ -78,19 +78,28 @@ async fn lineage_direction(
         .map(|t| t.max_depth_reached)
         .unwrap_or(false);
 
+    let bond_values = bonds_val
+        .iter()
+        .map(|bond| crate::output::LineageNode {
+            cmn_url: bond.uri.clone(),
+            domain: bond.domain.clone(),
+            name: bond.name.clone(),
+            synopsis: bond.synopsis.clone(),
+            license: bond.license.clone(),
+            intent: bond.intent.clone(),
+            relation: bond.relation.clone(),
+        })
+        .collect();
+
     Ok(crate::output::BondsOutput {
-        uri: uri_str.to_string(),
+        cmn_url: uri_str.to_string(),
         hash: hash.to_string(),
-        synapse: resolved.url,
+        synapse_url: resolved.synapse_url,
         direction: direction.to_string(),
         max_depth: bonds.result.query.max_depth,
         max_depth_reached: depth_reached,
-        count: bonds_val.len(),
-        bonds: serde_json::to_value(bonds_val)
-            .unwrap_or_default()
-            .as_array()
-            .cloned()
-            .unwrap_or_default(),
+        bond_count: bonds_val.len(),
+        bonds: bond_values,
     })
 }
 
@@ -118,7 +127,7 @@ pub async fn handle_lineage(
     )
     .await
     {
-        Ok(output) => out.ok(serde_json::to_value(output).unwrap_or_default()),
+        Ok(output) => out.ok(output),
         Err(e) => out.error_hypha(&e),
     }
 }

@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::process::ExitCode;
 
 use crate::api::Output;
@@ -6,33 +5,55 @@ use crate::{cache, config, mycelium, skill_admin, spore, synapse, visitor};
 
 use super::*;
 
-fn emit_cli_json(message: &str) {
-    let mut stdout = std::io::stdout();
-    let _ = stdout.write_all(message.as_bytes());
-    let _ = stdout.write_all(b"\n");
+fn emit_preflight_cli_error(message: &str, hint: &str) -> ExitCode {
+    let mut emitter = agent_first_data::CliEmitter::finite(agent_first_data::OutputFormat::Json)
+        .with_strict_protocol();
+    ExitCode::from(emitter.finish(agent_first_data::build_cli_error(message, Some(hint)), 2))
 }
 
-fn build_runtime() -> Result<tokio::runtime::Runtime, ExitCode> {
+fn build_runtime(out: &Output) -> Result<tokio::runtime::Runtime, ExitCode> {
     tokio::runtime::Runtime::new().map_err(|e| {
-        emit_cli_json(&render_cli_json(&cli_error_value(
-            &format!("Failed to create async runtime: {}", e),
-            "retry the command; if it repeats, check available system resources",
-        )));
-        ExitCode::FAILURE
+        out.error_hint(
+            "runtime_init_failed",
+            &format!("Failed to create async runtime: {e}"),
+            Some("retry the command; if it repeats, check available system resources"),
+        )
     })
 }
 
 fn emit_startup(out: &Output, cli: &Cli, log: &agent_first_data::LogFilters) {
     if log.enabled("startup") {
-        let mut args = serde_json::to_value(&cli.command)
-            .unwrap_or_else(|_| serde_json::Value::Object(Default::default()));
+        let mut args = match serde_json::to_value(&cli.command) {
+            Ok(args) => args,
+            Err(err) => {
+                out.warn(
+                    "startup_args_serialize_error",
+                    &format!("Failed to serialize parsed CLI arguments: {err}"),
+                );
+                serde_json::json!({
+                    "serialization_error": err.to_string(),
+                })
+            }
+        };
         if let Some(obj) = args.as_object_mut() {
             obj.insert(
                 "output".to_string(),
                 serde_json::Value::String(cli.output.clone()),
             );
-            if let Ok(log_value) = serde_json::to_value(log.as_slice()) {
-                obj.insert("log".to_string(), log_value);
+            obj.insert(
+                "output_to".to_string(),
+                serde_json::Value::String(cli.output_to.clone()),
+            );
+            match serde_json::to_value(log.as_slice()) {
+                Ok(log_value) => {
+                    obj.insert("log".to_string(), log_value);
+                }
+                Err(err) => {
+                    out.warn(
+                        "startup_log_filter_serialize_error",
+                        &format!("Failed to serialize CLI log filters: {err}"),
+                    );
+                }
             }
         }
         out.startup(args);
@@ -40,19 +61,30 @@ fn emit_startup(out: &Output, cli: &Cli, log: &agent_first_data::LogFilters) {
 }
 
 pub fn execute(cli: Cli) -> ExitCode {
-    let output_format = agent_first_data::cli_parse_output(&cli.output).unwrap_or_else(|e| {
-        emit_cli_json(&render_cli_json(&cli_error_value(
-            &e,
-            "use --output json, --output yaml, or --output plain",
-        )));
-        std::process::exit(2);
-    });
+    let output_format = match agent_first_data::cli_parse_output(&cli.output) {
+        Ok(format) => format,
+        Err(message) => {
+            return emit_preflight_cli_error(
+                &message,
+                "use --output json, --output yaml, or --output plain",
+            )
+        }
+    };
+    let output_to = match agent_first_data::OutputTo::parse(&cli.output_to) {
+        Ok(output_to) => output_to,
+        Err(message) => {
+            return emit_preflight_cli_error(
+                &message,
+                "use --output-to split, --output-to stdout, or --output-to stderr",
+            )
+        }
+    };
 
     let log = agent_first_data::cli_parse_log_filters(&cli.log);
-    let out = Output::new(output_format);
+    let out = Output::with_output_to(output_format, output_to);
     emit_startup(&out, &cli, &log);
 
-    let rt = match build_runtime() {
+    let rt = match build_runtime(&out) {
         Ok(rt) => rt,
         Err(code) => return code,
     };

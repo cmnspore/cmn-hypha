@@ -21,9 +21,9 @@ fn test_synapse_list_empty() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
     assert_eq!(json["kind"], "result");
-    assert_eq!(json["result"]["count"], 0);
+    assert_eq!(json["result"]["node_count"], 0);
     assert_eq!(json["result"]["nodes"], serde_json::json!([]));
-    assert_eq!(json["result"]["default"], serde_json::Value::Null);
+    assert_eq!(json["result"]["default_domain"], serde_json::Value::Null);
 }
 
 #[test]
@@ -41,9 +41,9 @@ fn test_synapse_add() {
     let json: serde_json::Value = parse_json_last_line(&stdout);
     assert_eq!(json["kind"], "result");
     assert_eq!(json["result"]["domain"], "synapse.cmn.dev");
-    assert_eq!(json["result"]["url"], "https://synapse.cmn.dev");
+    assert_eq!(json["result"]["synapse_url"], "https://synapse.cmn.dev");
     // First node becomes default
-    assert_eq!(json["result"]["default"], true);
+    assert_eq!(json["result"]["is_default"], true);
 
     // Verify per-node config.toml was created
     let node_config = env
@@ -104,9 +104,9 @@ fn test_synapse_add_multiple_and_list() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
-    assert_eq!(json["result"]["count"], 2);
+    assert_eq!(json["result"]["node_count"], 2);
     // First node should be default
-    assert_eq!(json["result"]["default"], "first.example.com");
+    assert_eq!(json["result"]["default_domain"], "first.example.com");
 
     let nodes = json["result"]["nodes"].as_array().unwrap();
     assert_eq!(nodes.len(), 2);
@@ -128,15 +128,18 @@ fn test_synapse_remove() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
     assert_eq!(json["kind"], "result");
-    assert_eq!(json["result"]["removed"], "test.example.com");
+    assert_eq!(json["result"]["removed_domain"], "test.example.com");
 
     // Verify list is empty
     let list_output = env.hypha(&["synapse", "list"]);
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
     let list_json: serde_json::Value = parse_json_last_line(&list_stdout);
-    assert_eq!(list_json["result"]["count"], 0);
+    assert_eq!(list_json["result"]["node_count"], 0);
     // Default should be cleared since we removed the default node
-    assert_eq!(list_json["result"]["default"], serde_json::Value::Null);
+    assert_eq!(
+        list_json["result"]["default_domain"],
+        serde_json::Value::Null
+    );
 }
 
 #[test]
@@ -171,14 +174,14 @@ fn test_synapse_use() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
-    assert_eq!(json["result"]["default"], "beta.example.com");
-    assert_eq!(json["result"]["url"], "https://beta.example.com");
+    assert_eq!(json["result"]["default_domain"], "beta.example.com");
+    assert_eq!(json["result"]["synapse_url"], "https://beta.example.com");
 
     // Verify list shows beta as default
     let list_output = env.hypha(&["synapse", "list"]);
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
     let list_json: serde_json::Value = parse_json_last_line(&list_stdout);
-    assert_eq!(list_json["result"]["default"], "beta.example.com");
+    assert_eq!(list_json["result"]["default_domain"], "beta.example.com");
 }
 
 #[test]
@@ -218,7 +221,7 @@ fn test_synapse_config_token_set_and_clear() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
-    assert_eq!(json["result"]["token_set"], true);
+    assert_eq!(json["result"]["has_token"], true);
 
     // Verify token is stored in per-node config.toml
     let node_config = env
@@ -252,7 +255,7 @@ fn test_synapse_config_token_set_and_clear() {
 
     let clear_stdout = String::from_utf8_lossy(&clear_output.stdout);
     let clear_json: serde_json::Value = parse_json_last_line(&clear_stdout);
-    assert_eq!(clear_json["result"]["token_set"], false);
+    assert_eq!(clear_json["result"]["has_token"], false);
 
     // Verify token is cleared
     let content2 = fs::read_to_string(&node_config).unwrap();
@@ -294,9 +297,9 @@ fn test_synapse_add_overwrites_existing() {
     let output = env.hypha(&["synapse", "list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
-    assert_eq!(json["result"]["count"], 1);
+    assert_eq!(json["result"]["node_count"], 1);
     assert_eq!(
-        json["result"]["nodes"][0]["url"],
+        json["result"]["nodes"][0]["synapse_url"],
         "https://test.example.com/v2"
     );
 }
@@ -315,9 +318,9 @@ fn test_synapse_remove_clears_default() {
     let output = env.hypha(&["synapse", "list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = parse_json_last_line(&stdout);
-    assert_eq!(json["result"]["count"], 1);
+    assert_eq!(json["result"]["node_count"], 1);
     // Default should be cleared since beta was removed
-    assert_eq!(json["result"]["default"], serde_json::Value::Null);
+    assert_eq!(json["result"]["default_domain"], serde_json::Value::Null);
 }
 
 #[test]
@@ -488,7 +491,7 @@ fn test_synapse_node_directory_structure() {
         "config.toml should exist in node dir"
     );
 
-    // Verify config.toml has defaults.synapse set
+    // Verify config.toml has defaults.synapse_domain set
     let config_path = env.dir.join("hypha").join("config.toml");
     assert!(config_path.exists(), "hypha config.toml should exist");
     let content = fs::read_to_string(&config_path).unwrap();

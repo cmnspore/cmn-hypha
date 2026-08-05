@@ -4,7 +4,7 @@ use super::*;
 ///
 /// The returned [`SenseOutput`](crate::output::SenseOutput) contains:
 /// - `data`: `{"mycelium": ...}` or `{"spore": ...}`.
-/// - `trace`: hypha metadata (`uri`, `cmn`, `verified`).
+/// - `trace`: Hypha metadata (`cmn_url`, `cmn`, `verified`).
 ///
 /// Cache-write warnings are emitted to `sink`; pass [`crate::NoopSink`] to discard.
 pub async fn sense(
@@ -38,7 +38,7 @@ pub async fn sense_with_id(
     let entry = get_cmn_entry(sink, &domain_cache, cache.cmn_ttl_ms).await?;
 
     let trace = json!({
-        "uri": uri_str,
+        "cmn_url": uri_str,
         "cmn": {
             "resolved": true,
             "cached": cmn_cached,
@@ -62,7 +62,7 @@ pub async fn sense_with_id(
     };
 
     Ok(crate::output::SenseOutput {
-        uri: output_uri,
+        cmn_url: output_uri,
         data,
         trace,
     })
@@ -96,10 +96,15 @@ fn with_resolved_trace(
     trace: serde_json::Value,
     resolved: &impl serde::Serialize,
     mycelium_verified: Option<serde_json::Value>,
-) -> serde_json::Value {
-    match trace {
+) -> Result<serde_json::Value, crate::HyphaError> {
+    Ok(match trace {
         serde_json::Value::Object(mut fields) => {
-            let mut resolved_value = serde_json::to_value(resolved).unwrap_or_default();
+            let mut resolved_value = serde_json::to_value(resolved).map_err(|e| {
+                crate::HyphaError::new(
+                    "serialize_error",
+                    format!("Failed to serialize resolved spore metadata: {e}"),
+                )
+            })?;
             if let (serde_json::Value::Object(ref mut resolved_fields), Some(verified)) =
                 (&mut resolved_value, mycelium_verified)
             {
@@ -109,7 +114,7 @@ fn with_resolved_trace(
             serde_json::Value::Object(fields)
         }
         other => other,
-    }
+    })
 }
 
 /// Emit a prominent warning when sensed data failed signature verification.
@@ -138,7 +143,7 @@ fn warn_if_unverified(
 }
 
 /// If the trust policy permits a synapse fallback and one is configured, run
-/// `fetch` against the resolved synapse `(url, token)`. Otherwise return
+/// `fetch` against the resolved synapse `(synapse_url, token_secret)`. Otherwise return
 /// `domain_err` unchanged. Centralizes the fallback/trust decision shared by the
 /// mycelium and spore sense paths.
 async fn with_synapse_fallback<T, F, Fut>(
@@ -326,9 +331,9 @@ async fn sense_spore_id_data(
     })?;
     let resolved = crate::mycelium::resolve_spore_ref(domain, spore_id, &mycelium, None)?;
     let mycelium_verified = trace.get("verified").cloned();
-    let trace = with_resolved_trace(trace, &resolved, mycelium_verified);
+    let trace = with_resolved_trace(trace, &resolved, mycelium_verified)?;
     let (data, trace) = sense_spore_data(&resolved.hash, entry, trace, sink).await?;
-    Ok((data, trace, resolved.uri))
+    Ok((data, trace, resolved.cmn_url))
 }
 
 /// Handle the `sense` command — thin CLI wrapper around [`sense`].

@@ -105,7 +105,7 @@ fn test_cache_list_with_manual_cache() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("\"count\":1"),
+        stdout.contains("\"spore_count\":1"),
         "should show one cached spore: {}",
         stdout
     );
@@ -185,7 +185,7 @@ fn test_cache_clean_all() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("\"removed\":1"),
+        stdout.contains("\"removed_count\":1"),
         "should show 1 removed: {}",
         stdout
     );
@@ -194,7 +194,7 @@ fn test_cache_clean_all() {
     let output = env.hypha(&["cache", "list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("\"count\":0"),
+        stdout.contains("\"spore_count\":0"),
         "should be empty after clean: {}",
         stdout
     );

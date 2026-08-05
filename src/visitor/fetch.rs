@@ -20,12 +20,11 @@ pub(super) fn json_fetch_opts() -> substrate::client::FetchOptions {
     substrate::client::FetchOptions::with_max_bytes(JSON_FETCH_MAX_BYTES)
 }
 
-/// Build FetchOptions with optional Bearer token.
-pub(super) fn fetch_opts(token: Option<&str>) -> substrate::client::FetchOptions {
-    match token {
-        Some(t) => {
-            substrate::client::FetchOptions::with_bearer_token(t).max_bytes(JSON_FETCH_MAX_BYTES)
-        }
+/// Build FetchOptions with an optional Bearer secret.
+pub(super) fn fetch_opts(token_secret: Option<&str>) -> substrate::client::FetchOptions {
+    match token_secret {
+        Some(token_secret) => substrate::client::FetchOptions::with_bearer_token(token_secret)
+            .max_bytes(JSON_FETCH_MAX_BYTES),
         None => json_fetch_opts(),
     }
 }
@@ -123,7 +122,7 @@ pub(super) async fn fetch_bonds(
     hash: &str,
     direction: &str,
     max_depth: u32,
-    token: Option<&str>,
+    token_secret: Option<&str>,
 ) -> Result<substrate::client::BondsResponse, crate::HyphaError> {
     let client = substrate::client::http_client(30).map_err(|e| {
         crate::HyphaError::new(
@@ -137,7 +136,7 @@ pub(super) async fn fetch_bonds(
         hash,
         direction,
         max_depth,
-        fetch_opts(token),
+        fetch_opts(token_secret),
     )
     .await
     .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))
@@ -306,16 +305,18 @@ pub(crate) async fn fetch_spore_to_cache(
                         ));
                     }
                     Err(e) if e.is_malicious() => {
+                        let safe_url = agent_first_data::redact_url_secrets(&archive_url);
                         sink.emit(crate::HyphaEvent::Warn {
                             message: format!(
                                 "Unverified content from {} was rejected: {}",
-                                archive_url, e
+                                safe_url, e
                             ),
                         });
                     }
                     Err(e) => {
+                        let safe_url = agent_first_data::redact_url_secrets(&archive_url);
                         sink.emit(crate::HyphaEvent::Warn {
-                            message: format!("Failed to download from {}: {}", archive_url, e),
+                            message: format!("Failed to download from {}: {}", safe_url, e),
                         });
                     }
                 }
@@ -332,8 +333,9 @@ pub(crate) async fn fetch_spore_to_cache(
                     break;
                 }
                 Err(e) => {
+                    let safe_url = agent_first_data::redact_url_secrets(git_url);
                     sink.emit(crate::HyphaEvent::Warn {
-                        message: format!("Failed to clone from {}: {}", git_url, e),
+                        message: format!("Failed to clone from {}: {}", safe_url, e),
                     });
                 }
             }

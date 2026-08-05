@@ -85,16 +85,19 @@ fn validate_remote_url(url: &str) -> Result<(), GitError> {
     // substrate::normalize_and_validate_url covers: SSRF
     // (private/reserved IPs, localhost, link-local, CGNAT), userinfo, bare
     // hostnames, scheme validation, and trailing-slash normalization.
-    let normalized = substrate::normalize_and_validate_url(url)
-        .map_err(|e| GitError::InvalidUrl(e.to_string()))?;
+    let normalized = substrate::normalize_and_validate_url(url).map_err(|e| {
+        let safe_url = agent_first_data::redact_url_secrets(url);
+        GitError::InvalidUrl(e.to_string().replace(url, &safe_url))
+    })?;
 
     // substrate allows HTTP for .onion/.i2p — git requires strict HTTPS
     let parsed = reqwest::Url::parse(&normalized)
         .map_err(|e| GitError::InvalidUrl(format!("invalid URL syntax ({})", e)))?;
     if parsed.scheme() != "https" {
+        let safe_url = agent_first_data::redact_url_secrets(url);
         return Err(GitError::InvalidUrl(format!(
             "only https:// URLs are allowed (got: {})",
-            url
+            safe_url
         )));
     }
     Ok(())
@@ -549,6 +552,16 @@ mod tests {
 
         let err = enforce_size_budget(dir.path(), GitSizeLimits::new(1024, 1)).unwrap_err();
         assert!(matches!(err, GitError::SizeLimit(_)));
+    }
+
+    #[test]
+    fn remote_url_validation_redacts_userinfo_password() {
+        let password = "git-password-canary";
+        let err = validate_remote_url(&format!("https://agent:{password}@example.com/repo.git"))
+            .unwrap_err()
+            .to_string();
+        assert!(!err.contains(password));
+        assert!(err.contains("***"));
     }
 
     #[cfg(unix)]

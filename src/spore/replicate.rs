@@ -109,7 +109,7 @@ pub async fn handle_replicate(
         let target_manifest_path = site.spores_dir().join(format!("{}.json", hash));
         if target_manifest_path.exists() {
             replicated.push(json!({
-                "uri": uri_str,
+                "cmn_url": uri_str,
                 "hash": hash,
                 "status": "already_exists",
             }));
@@ -277,8 +277,8 @@ pub async fn handle_replicate(
         }
 
         replicated.push(json!({
-            "uri": format!("cmn://{}/{}", domain, hash),
-            "source_uri": uri_str,
+            "cmn_url": format!("cmn://{}/{}", domain, hash),
+            "source_cmn_url": uri_str,
             "hash": hash,
             "status": "replicated",
             "original_domain": source_spore.capsule.core.domain,

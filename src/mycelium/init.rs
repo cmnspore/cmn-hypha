@@ -246,7 +246,7 @@ fn handle_init_hub(
     // Register the hub as a synapse node + set defaults for auto-submit
     let hub_url = format!("https://{}", hub_domain);
     let synapse_node = crate::config::SynapseNode {
-        url: hub_url,
+        synapse_url: hub_url,
         token_secret: None,
     };
     if let Err(e) = crate::config::save_synapse_node(hub_domain, &synapse_node) {
@@ -261,7 +261,7 @@ fn handle_init_hub(
         Err(e) => return out.error_hypha(&e),
     };
     config.defaults.taste.domain = Some(domain.clone());
-    config.defaults.taste.synapse = Some(hub_domain.to_string());
+    config.defaults.taste.synapse_domain = Some(hub_domain.to_string());
     if let Err(e) = config.save() {
         return out.error("config_error", &format!("Failed to save defaults: {}", e));
     }

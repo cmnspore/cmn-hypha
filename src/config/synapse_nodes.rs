@@ -5,15 +5,16 @@ use serde::{Deserialize, Serialize};
 use super::{files::write_text_file_atomic, hypha_dir, HyphaConfig};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SynapseNode {
-    pub url: String,
+    pub synapse_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_secret: Option<String>,
 }
 
 /// Resolved synapse: URL + optional auth token
 pub struct ResolvedSynapse {
-    pub url: String,
+    pub synapse_url: String,
     pub token_secret: Option<String>,
 }
 
@@ -145,12 +146,13 @@ pub fn list_synapse_domains() -> Vec<String> {
 pub fn domain_from_url(url: &str) -> Result<String, crate::sink::HyphaError> {
     use crate::sink::HyphaError;
 
+    let safe_url = agent_first_data::redact_url_secrets(url);
     let parsed = reqwest::Url::parse(url)
-        .map_err(|e| HyphaError::new("invalid_url", format!("Invalid URL '{}': {}", url, e)))?;
+        .map_err(|e| HyphaError::new("invalid_url", format!("Invalid URL: {}", e)))?;
     let domain = parsed
         .host_str()
         .map(|h| h.to_string())
-        .ok_or_else(|| HyphaError::new("invalid_url", format!("URL '{}' has no host", url)))?;
+        .ok_or_else(|| HyphaError::new("invalid_url", format!("URL '{}' has no host", safe_url)))?;
     validate_synapse_domain(&domain)?;
     Ok(domain)
 }
@@ -176,25 +178,33 @@ fn is_ip_literal_host(host: &str) -> bool {
 pub fn validate_synapse_url(url: &str) -> Result<(), crate::sink::HyphaError> {
     use crate::sink::HyphaError;
 
+    let safe_url = agent_first_data::redact_url_secrets(url);
     let parsed = reqwest::Url::parse(url).map_err(|e| {
-        HyphaError::new(
-            "invalid_synapse_url",
-            format!("Invalid synapse URL '{}': {}", url, e),
-        )
+        HyphaError::new("invalid_synapse_url", format!("Invalid synapse URL: {}", e))
     })?;
     let host = parsed.host_str().ok_or_else(|| {
         HyphaError::new(
             "invalid_synapse_url",
-            format!("Invalid synapse URL '{}': missing host", url),
+            format!("Invalid synapse URL '{}': missing host", safe_url),
         )
     })?;
+
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(HyphaError::new(
+            "invalid_synapse_url",
+            format!(
+                "Credentials are rejected in synapse URL '{}'; use --token-secret instead",
+                safe_url
+            ),
+        ));
+    }
 
     if is_ip_literal_host(host) {
         return Err(HyphaError::new(
             "invalid_synapse_url",
             format!(
                 "IP literal hosts are rejected for synapse URL '{}'; use a domain name",
-                url
+                safe_url
             ),
         ));
     }
@@ -207,7 +217,7 @@ pub fn validate_synapse_url(url: &str) -> Result<(), crate::sink::HyphaError> {
                 "invalid_synapse_url",
                 format!(
                     "Insecure cleartext transport rejected for synapse URL '{}'; use https, or http only for .onion/.i2p",
-                    url
+                    safe_url
                 ),
             ));
         }
@@ -217,7 +227,7 @@ pub fn validate_synapse_url(url: &str) -> Result<(), crate::sink::HyphaError> {
                 format!(
                     "Insecure cleartext scheme '{}' rejected for synapse URL '{}'",
                     parsed.scheme(),
-                    url
+                    safe_url
                 ),
             ));
         }
@@ -240,7 +250,7 @@ pub fn resolve_synapse(
             let domain = domain_from_url(v)?;
             let node = load_synapse_node(&domain);
             ResolvedSynapse {
-                url: v.to_string(),
+                synapse_url: v.to_string(),
                 token_secret: node.and_then(|n| n.token_secret),
             }
         }
@@ -248,9 +258,9 @@ pub fn resolve_synapse(
             validate_synapse_domain(domain)?;
             match load_synapse_node(domain) {
                 Some(node) => {
-                    validate_synapse_url(&node.url)?;
+                    validate_synapse_url(&node.synapse_url)?;
                     ResolvedSynapse {
-                        url: node.url,
+                        synapse_url: node.synapse_url,
                         token_secret: node.token_secret,
                     }
                 }
@@ -265,12 +275,12 @@ pub fn resolve_synapse(
         }
         None => {
             let config = HyphaConfig::load()?;
-            match &config.defaults.synapse {
+            match &config.defaults.synapse_domain {
                 Some(default_domain) => match load_synapse_node(default_domain) {
                     Some(node) => {
-                        validate_synapse_url(&node.url)?;
+                        validate_synapse_url(&node.synapse_url)?;
                         ResolvedSynapse {
-                            url: node.url,
+                            synapse_url: node.synapse_url,
                             token_secret: node.token_secret,
                         }
                     }

@@ -15,23 +15,30 @@ pub(super) async fn check_for_update(
     domain: &str,
     current_hash: &str,
     synapse_url: &str,
-    synapse_token: Option<&str>,
+    synapse_token_secret: Option<&str>,
     sink: &dyn crate::EventSink,
 ) -> Result<Option<(String, String)>, crate::HyphaError> {
-    let new_hash =
-        match find_latest_version(synapse_url, current_hash, domain, synapse_token, sink).await {
-            Ok(Some(node)) => {
-                let parsed = CmnUri::parse(&node.uri).map_err(|e| {
-                    crate::HyphaError::new("lineage_error", format!("Invalid lineage URI: {}", e))
-                })?;
-                match parsed.hash {
-                    Some(h) => h,
-                    None => return Ok(None),
-                }
+    let new_hash = match find_latest_version(
+        synapse_url,
+        current_hash,
+        domain,
+        synapse_token_secret,
+        sink,
+    )
+    .await
+    {
+        Ok(Some(node)) => {
+            let parsed = CmnUri::parse(&node.uri).map_err(|e| {
+                crate::HyphaError::new("lineage_error", format!("Invalid lineage URI: {}", e))
+            })?;
+            match parsed.hash {
+                Some(h) => h,
+                None => return Ok(None),
             }
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(e),
-        };
+        }
+        Ok(None) => return Ok(None),
+        Err(e) => return Err(e),
+    };
 
     if new_hash == current_hash {
         return Ok(None);
@@ -53,7 +60,7 @@ pub(super) async fn check_for_update(
 pub(super) async fn update_bonds(
     dir: &std::path::Path,
     synapse_url: &str,
-    synapse_token: Option<&str>,
+    synapse_token_secret: Option<&str>,
     sink: &dyn crate::EventSink,
 ) -> Result<serde_json::Value, crate::HyphaError> {
     let spore_core_path = dir.join("spore.core.json");
@@ -95,7 +102,15 @@ pub(super) async fn update_bonds(
             message: format!("Checking {} ({})...", id, relation),
         });
 
-        match check_for_update(&parsed.domain, &hash, synapse_url, synapse_token, sink).await {
+        match check_for_update(
+            &parsed.domain,
+            &hash,
+            synapse_url,
+            synapse_token_secret,
+            sink,
+        )
+        .await
+        {
             Ok(Some((new_uri, new_hash))) => {
                 updated.push(BondUpdate {
                     id: id.to_string(),
@@ -149,7 +164,7 @@ pub(super) async fn find_latest_version(
     synapse_url: &str,
     current_hash: &str,
     source_domain: &str,
-    token: Option<&str>,
+    token_secret: Option<&str>,
     sink: &dyn crate::EventSink,
 ) -> Result<Option<BondNode>, crate::HyphaError> {
     let mut candidate_hash = current_hash.to_string();
@@ -171,7 +186,7 @@ pub(super) async fn find_latest_version(
         }
         depth += 1;
 
-        let bonds = fetch_bonds(synapse_url, &candidate_hash, "inbound", 1, token).await?;
+        let bonds = fetch_bonds(synapse_url, &candidate_hash, "inbound", 1, token_secret).await?;
 
         let same_domain: Vec<BondNode> = bonds
             .result

@@ -123,7 +123,7 @@ pub async fn grow(
         })?;
 
     let new_hash: String = match find_latest_version(
-        &resolved_synapse.url,
+        &resolved_synapse.synapse_url,
         &current_hash,
         &source_domain,
         resolved_synapse.token_secret.as_deref(),
@@ -141,7 +141,7 @@ pub async fn grow(
         }
         Ok(None) => {
             return Ok(crate::output::GrowOutput::UpToDate {
-                uri: spawned_uri,
+                cmn_url: spawned_uri,
                 hash: current_hash,
             });
         }
@@ -150,7 +150,7 @@ pub async fn grow(
 
     if new_hash == current_hash {
         return Ok(crate::output::GrowOutput::UpToDate {
-            uri: spawned_uri,
+            cmn_url: spawned_uri,
             hash: current_hash,
         });
     }
@@ -324,7 +324,7 @@ pub async fn grow(
     }
 
     Ok(crate::output::GrowOutput::Updated {
-        uri: new_uri_str,
+        cmn_url: new_uri_str,
         old_hash: current_hash,
         new_hash,
         method,
@@ -353,7 +353,7 @@ pub async fn handle_grow(
     )
     .await
     {
-        Ok(output) => serde_json::to_value(output).unwrap_or_default(),
+        Ok(output) => output,
         Err(e) => return out.error_hypha(&e),
     };
 
@@ -370,7 +370,14 @@ pub async fn handle_grow(
 
         // Check bonds for updates (requires synapse)
         if let Ok(resolved) = crate::config::resolve_synapse(synapse_arg, synapse_token_secret) {
-            match update_bonds(&dir, &resolved.url, resolved.token_secret.as_deref(), &sink).await {
+            match update_bonds(
+                &dir,
+                &resolved.synapse_url,
+                resolved.token_secret.as_deref(),
+                &sink,
+            )
+            .await
+            {
                 Ok(_) => {}
                 Err(e) => {
                     crate::EventSink::emit(

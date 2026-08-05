@@ -53,7 +53,7 @@ pub async fn search_with_bond(
 
     let response = substrate::client::search(
         &client,
-        &resolved.url,
+        &resolved.synapse_url,
         query,
         domain,
         license,
@@ -64,17 +64,25 @@ pub async fn search_with_bond(
     .await
     .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
 
-    let results: Vec<serde_json::Value> = response
+    let results: Vec<crate::output::SearchResult> = response
         .result
         .spores
         .iter()
-        .filter_map(|r| serde_json::to_value(r).ok())
+        .map(|result| crate::output::SearchResult {
+            cmn_url: result.uri.clone(),
+            domain: result.domain.clone(),
+            name: result.name.clone(),
+            synopsis: result.synopsis.clone(),
+            license: result.license.clone(),
+            intent: result.intent.clone(),
+            relevance: result.relevance,
+        })
         .collect();
 
     Ok(crate::output::SearchOutput {
         query: query.to_string(),
-        synapse: resolved.url,
-        count: results.len(),
+        synapse_url: resolved.synapse_url,
+        result_count: results.len(),
         results,
     })
 }
@@ -104,7 +112,7 @@ pub async fn handle_search(
     )
     .await
     {
-        Ok(output) => out.ok(serde_json::to_value(output).unwrap_or_default()),
+        Ok(output) => out.ok(output),
         Err(e) => out.error_hypha(&e),
     }
 }

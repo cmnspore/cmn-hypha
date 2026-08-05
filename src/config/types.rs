@@ -1,17 +1,17 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct HyphaConfig {
     pub defaults: Defaults,
     pub cache: CacheConfig,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Defaults {
-    /// Default synapse for queries (sense, lineage, search)
-    pub synapse: Option<String>,
+    /// Default Synapse domain for queries (sense, lineage, search)
+    pub synapse_domain: Option<String>,
     /// Default domain for publishing (release)
     pub domain: Option<String>,
     /// Taste-specific overrides for auto-submission.
@@ -21,10 +21,10 @@ pub struct Defaults {
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TasteDefaults {
-    /// Synapse to submit taste reports to
-    pub synapse: Option<String>,
+    /// Synapse domain to submit taste reports to
+    pub synapse_domain: Option<String>,
     /// Domain to sign taste reports with
     pub domain: Option<String>,
 }

@@ -16,7 +16,7 @@ use serde_json::Value;
 /// signature verification).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SenseOutput {
-    pub uri: String,
+    pub cmn_url: String,
     /// Resolved content — a mycelium manifest or spore manifest.
     pub data: Value,
     /// Resolution metadata: DNS, cmn.json caching, signature verification.
@@ -29,9 +29,21 @@ pub struct SenseOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchOutput {
     pub query: String,
-    pub synapse: String,
-    pub count: usize,
-    pub results: Vec<Value>,
+    pub synapse_url: String,
+    pub result_count: usize,
+    pub results: Vec<SearchResult>,
+}
+
+/// One Hypha-owned search result adapted from the Synapse wire response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub cmn_url: String,
+    pub domain: String,
+    pub name: String,
+    pub synopsis: String,
+    pub license: String,
+    pub intent: Vec<String>,
+    pub relevance: f32,
 }
 
 // ───────────────────────── taste ─────────────────────────
@@ -39,14 +51,14 @@ pub struct SearchOutput {
 /// Result of `taste` (download mode — no verdict supplied).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TasteDownloadOutput {
-    pub uri: String,
+    pub cmn_url: String,
     pub cache_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub synopsis: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
+    pub parent_cmn_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub taste: Option<TasteVerdict>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,7 +77,7 @@ pub struct TasteVerdict {
 /// Result of `taste --verdict <verdict>` (record mode).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TasteRecordOutput {
-    pub uri: String,
+    pub cmn_url: String,
     pub verdict: substrate::TasteVerdict,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
@@ -73,7 +85,7 @@ pub struct TasteRecordOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shared: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub synapse: Option<String>,
+    pub synapse_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_error: Option<String>,
 }
@@ -91,7 +103,7 @@ pub enum TasteOutput {
 /// Result of a successful `spawn`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnOutput {
-    pub uri: String,
+    pub cmn_url: String,
     pub name: String,
     pub path: String,
     pub source_type: String,
@@ -107,14 +119,14 @@ pub struct SpawnOutput {
 pub enum GrowOutput {
     #[serde(rename = "updated")]
     Updated {
-        uri: String,
+        cmn_url: String,
         old_hash: String,
         new_hash: String,
         method: String,
         path: String,
     },
     #[serde(rename = "up_to_date")]
-    UpToDate { uri: String, hash: String },
+    UpToDate { cmn_url: String, hash: String },
 }
 
 // ───────────────────────── bond ──────────────────────────
@@ -122,7 +134,7 @@ pub enum GrowOutput {
 /// A single bonded entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BondedRef {
-    pub uri: String,
+    pub cmn_url: String,
     pub relation: substrate::BondRelation,
     pub status: String,
 }
@@ -138,7 +150,7 @@ pub struct BondOutput {
 /// A single bond status entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BondStatusRef {
-    pub uri: String,
+    pub cmn_url: String,
     pub relation: substrate::BondRelation,
     /// `true`, `false`, or `"excluded"` for spawned_from/absorbed_from.
     pub bonded: Value,
@@ -159,7 +171,7 @@ pub struct BondCleanOutput {
 /// A bond ref with its taste status, returned when some refs are not tasted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BondTasteRef {
-    pub uri: String,
+    pub cmn_url: String,
     pub relation: substrate::BondRelation,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -188,24 +200,26 @@ pub enum BondResult {
 /// A node in the bond graph (ancestor or descendant).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LineageNode {
-    pub uri: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub domain: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub depth: Option<u32>,
+    pub cmn_url: String,
+    pub domain: String,
+    pub name: String,
+    pub synopsis: String,
+    pub license: String,
+    pub intent: Vec<String>,
+    pub relation: substrate::BondRelation,
 }
 
 /// Result of `bonds`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BondsOutput {
-    pub uri: String,
+    pub cmn_url: String,
     pub hash: String,
-    pub synapse: String,
+    pub synapse_url: String,
     pub direction: String,
     pub max_depth: u32,
     pub max_depth_reached: bool,
-    pub count: usize,
-    pub bonds: Vec<Value>,
+    pub bond_count: usize,
+    pub bonds: Vec<LineageNode>,
 }
 
 // ───────────────────────── absorb ────────────────────────
@@ -213,7 +227,7 @@ pub struct BondsOutput {
 /// A single absorb source.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AbsorbSourceInfo {
-    pub uri: String,
+    pub cmn_url: String,
     pub hash: String,
     pub name: String,
     pub path: String,

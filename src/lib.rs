@@ -18,8 +18,8 @@ pub mod visitor;
 pub use output::{
     AbsorbOutput, AbsorbSourceInfo, BondCleanOutput, BondOutput, BondResult, BondStatusOutput,
     BondStatusRef, BondTasteRef, BondTasteRequired, BondedRef, BondsOutput, GrowOutput,
-    LineageNode, SearchOutput, SenseOutput, SpawnOutput, TasteDownloadOutput, TasteOutput,
-    TasteRecordOutput, TasteVerdict,
+    LineageNode, SearchOutput, SearchResult, SenseOutput, SpawnOutput, TasteDownloadOutput,
+    TasteOutput, TasteRecordOutput, TasteVerdict,
 };
 pub use sink::{AfDataSink, EventSink, HyphaError, HyphaEvent, NoopSink};
 pub use visitor::{

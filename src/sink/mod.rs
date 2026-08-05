@@ -94,11 +94,39 @@ impl From<&str> for HyphaError {
 /// Emits events as afdata JSON to stdout — used by library callers.
 pub struct AfDataSink;
 
+struct AfDataSinkMessage {
+    event: agent_first_data::Event,
+    reply: std::sync::mpsc::SyncSender<()>,
+}
+
+fn afdata_sink_sender() -> &'static std::sync::mpsc::Sender<AfDataSinkMessage> {
+    static SENDER: std::sync::OnceLock<std::sync::mpsc::Sender<AfDataSinkMessage>> =
+        std::sync::OnceLock::new();
+    SENDER.get_or_init(|| {
+        let (sender, receiver) = std::sync::mpsc::channel::<AfDataSinkMessage>();
+        std::thread::spawn(move || {
+            let mut emitter = agent_first_data::CliEmitter::stream(
+                std::io::stdout(),
+                agent_first_data::OutputFormat::Json,
+            )
+            .with_strict_protocol();
+            while let Ok(message) = receiver.recv() {
+                let _ = emitter.emit(message.event);
+                let _ = message.reply.send(());
+            }
+        });
+        sender
+    })
+}
+
 fn emit(event: agent_first_data::Event) {
-    let stdout = std::io::stdout();
-    let mut emitter =
-        agent_first_data::CliEmitter::new(stdout.lock(), agent_first_data::OutputFormat::Json);
-    let _ = emitter.emit(event);
+    let (reply, result) = std::sync::mpsc::sync_channel(1);
+    if afdata_sink_sender()
+        .send(AfDataSinkMessage { event, reply })
+        .is_ok()
+    {
+        let _ = result.recv();
+    }
 }
 
 impl EventSink for AfDataSink {
@@ -113,7 +141,7 @@ impl EventSink for AfDataSink {
                     agent_first_data::json_progress(serde_json::json!({
                         "current": current,
                         "total": total,
-                        "message": message,
+                        "message": crate::api::redact_urls_in_text(&message),
                     }))
                     .build(),
                 );
@@ -132,13 +160,21 @@ impl EventSink for AfDataSink {
                 );
             }
             HyphaEvent::Log { message } => {
-                emit(agent_first_data::json_log(serde_json::json!({ "message": message })).build());
+                emit(
+                    agent_first_data::json_log(serde_json::json!({
+                        "level": "info",
+                        "message": crate::api::redact_urls_in_text(&message),
+                    }))
+                    .build(),
+                );
             }
             HyphaEvent::Warn { message } => {
                 emit(
-                    agent_first_data::json_log(
-                        serde_json::json!({ "event": "warn", "message": message }),
-                    )
+                    agent_first_data::json_log(serde_json::json!({
+                        "level": "warn",
+                        "event": "warn",
+                        "message": crate::api::redact_urls_in_text(&message),
+                    }))
                     .build(),
                 );
             }

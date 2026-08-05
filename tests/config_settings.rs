@@ -66,3 +66,31 @@ fn test_config_set_rejects_legacy_spore_cache_keys() {
         );
     }
 }
+
+#[test]
+fn test_config_set_result_preserves_stored_value_types() {
+    let env = TestEnv::new();
+    for (key, raw, expected) in [
+        ("cache.cmn_ttl_s", "42", serde_json::json!(42)),
+        (
+            "cache.require_domain_first_key",
+            "false",
+            serde_json::json!(false),
+        ),
+        (
+            "cache.spore_reject_path_components",
+            r#"[".git", "control"]"#,
+            serde_json::json!([".git", "control"]),
+        ),
+    ] {
+        let output = env.hypha(&["config", "set", key, raw]);
+        assert!(
+            output.status.success(),
+            "config set {key} failed: {}",
+            combined_text(&output)
+        );
+        let event = parse_json_last_line(&String::from_utf8_lossy(&output.stdout));
+        assert!(agent_first_data::validate_protocol_event(&event, true).is_ok());
+        assert_eq!(event["result"]["value"], expected);
+    }
+}

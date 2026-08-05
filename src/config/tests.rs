@@ -14,14 +14,14 @@ fn test_default_values() {
         cfg.cache.spore_reject_path_components,
         vec![".git".to_string(), ".cmn".to_string()]
     );
-    assert!(cfg.defaults.synapse.is_none());
+    assert!(cfg.defaults.synapse_domain.is_none());
 }
 
 #[test]
 fn test_parse_full_toml() {
     let toml_str = r#"
 [defaults]
-synapse = "synapse.cmn.dev"
+synapse_domain = "synapse.cmn.dev"
 
 [cache]
 cmn_ttl_s = 60
@@ -41,7 +41,10 @@ spore_reject_path_components = [".git", ".cmn"]
         cfg.cache.spore_reject_path_components,
         vec![".git".to_string(), ".cmn".to_string()]
     );
-    assert_eq!(cfg.defaults.synapse.as_deref(), Some("synapse.cmn.dev"));
+    assert_eq!(
+        cfg.defaults.synapse_domain.as_deref(),
+        Some("synapse.cmn.dev")
+    );
 }
 
 #[test]
@@ -52,6 +55,22 @@ cmn_ttl_s = 10
 "#;
     let cfg: HyphaConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(cfg.cache.cmn_ttl_s, 10);
+}
+
+#[test]
+fn test_legacy_synapse_config_keys_are_unsupported() {
+    let defaults_err =
+        toml::from_str::<HyphaConfig>("[defaults]\nsynapse = \"synapse.cmn.dev\"\n").unwrap_err();
+    assert!(defaults_err.to_string().contains("unknown field"));
+
+    let taste_err =
+        toml::from_str::<HyphaConfig>("[defaults.taste]\nsynapse = \"synapse.cmn.dev\"\n")
+            .unwrap_err();
+    assert!(taste_err.to_string().contains("unknown field"));
+
+    let node_err =
+        toml::from_str::<SynapseNode>("url = \"https://synapse.cmn.dev\"\n").unwrap_err();
+    assert!(node_err.to_string().contains("unknown field"));
 }
 
 #[test]
@@ -138,13 +157,93 @@ fn test_config_save_load() {
     std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     let mut cfg = HyphaConfig::default();
-    cfg.defaults.synapse = Some("synapse.cmn.dev".to_string());
+    cfg.defaults.synapse_domain = Some("synapse.cmn.dev".to_string());
     cfg.cache.cmn_ttl_s = 999;
     cfg.save().unwrap();
 
     let loaded = HyphaConfig::load().unwrap();
-    assert_eq!(loaded.defaults.synapse.as_deref(), Some("synapse.cmn.dev"));
+    assert_eq!(
+        loaded.defaults.synapse_domain.as_deref(),
+        Some("synapse.cmn.dev")
+    );
     assert_eq!(loaded.cache.cmn_ttl_s, 999);
+
+    std::env::remove_var("CMN_HOME");
+}
+
+#[test]
+fn test_config_save_preserves_existing_toml_source() {
+    let _lock = super::ENV_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let hypha_dir = dir.path().join("hypha");
+    std::fs::create_dir_all(&hypha_dir).unwrap();
+    std::fs::write(
+        hypha_dir.join("config.toml"),
+        "# operator note\n\n[defaults]\ndomain = 'example.com' # keep quote style\n\n[cache]\ncmn_ttl_s   = 60 # tuned\n",
+    )
+    .unwrap();
+    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+
+    let mut cfg = HyphaConfig::load().unwrap();
+    cfg.cache.cmn_ttl_s = 90;
+    cfg.save().unwrap();
+
+    let source = std::fs::read_to_string(hypha_dir.join("config.toml")).unwrap();
+    assert!(source.contains("# operator note"));
+    assert!(source.contains("domain = 'example.com' # keep quote style"));
+    assert!(source.contains("cmn_ttl_s   = 90 # tuned"));
+
+    std::env::remove_var("CMN_HOME");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_config_save_refuses_symlink_target() {
+    let _lock = super::ENV_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let hypha_dir = dir.path().join("hypha");
+    std::fs::create_dir_all(&hypha_dir).unwrap();
+    let target = dir.path().join("real-config.toml");
+    std::fs::write(&target, "[cache]\ncmn_ttl_s = 60\n").unwrap();
+    std::os::unix::fs::symlink(&target, hypha_dir.join("config.toml")).unwrap();
+    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+
+    let mut cfg = HyphaConfig::load().unwrap();
+    cfg.cache.cmn_ttl_s = 90;
+    let error = cfg.save().unwrap_err();
+
+    assert_eq!(error.code, "config_save_failed");
+    assert!(error.message.contains("refusing to mutate symlink"));
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "[cache]\ncmn_ttl_s = 60\n"
+    );
+
+    std::env::remove_var("CMN_HOME");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_config_save_refuses_hardlinked_target() {
+    let _lock = super::ENV_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let hypha_dir = dir.path().join("hypha");
+    std::fs::create_dir_all(&hypha_dir).unwrap();
+    let target = dir.path().join("real-config.toml");
+    std::fs::write(&target, "[cache]\ncmn_ttl_s = 60\n").unwrap();
+    std::fs::hard_link(&target, hypha_dir.join("config.toml")).unwrap();
+    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+
+    let mut cfg = HyphaConfig::load().unwrap();
+    cfg.cache.cmn_ttl_s = 90;
+    let error = cfg.save().unwrap_err();
+
+    assert_eq!(error.code, "config_save_failed");
+    assert!(error.message.contains("refusing to mutate hardlinked file"));
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "[cache]\ncmn_ttl_s = 60\n"
+    );
 
     std::env::remove_var("CMN_HOME");
 }
@@ -163,7 +262,7 @@ fn test_config_load_invalid_file_returns_error() {
     assert!(err.message.contains("config.toml"));
     assert_eq!(
         err.hint.as_deref(),
-        Some("fix the file or remove it to use defaults")
+        Some("fix the configuration file or its permissions and retry")
     );
 
     std::env::remove_var("CMN_HOME");
@@ -172,22 +271,22 @@ fn test_config_load_invalid_file_returns_error() {
 #[test]
 fn test_synapse_node_roundtrip() {
     let toml_str = r#"
-url = "https://synapse.cmn.dev"
+synapse_url = "https://synapse.cmn.dev"
 token_secret = "sk-abc123"
 "#;
     let node: SynapseNode = toml::from_str(toml_str).unwrap();
-    assert_eq!(node.url, "https://synapse.cmn.dev");
+    assert_eq!(node.synapse_url, "https://synapse.cmn.dev");
     assert_eq!(node.token_secret.as_deref(), Some("sk-abc123"));
 
     let serialized = toml::to_string_pretty(&node).unwrap();
     let parsed: SynapseNode = toml::from_str(&serialized).unwrap();
-    assert_eq!(parsed.url, "https://synapse.cmn.dev");
+    assert_eq!(parsed.synapse_url, "https://synapse.cmn.dev");
     assert_eq!(parsed.token_secret.as_deref(), Some("sk-abc123"));
 }
 
 #[test]
 fn test_synapse_node_no_token() {
-    let toml_str = "url = \"https://synapse.cmn.dev\"\n";
+    let toml_str = "synapse_url = \"https://synapse.cmn.dev\"\n";
     let node: SynapseNode = toml::from_str(toml_str).unwrap();
     assert!(node.token_secret.is_none());
 
@@ -202,7 +301,7 @@ fn test_save_load_synapse_node() {
     std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     let node = SynapseNode {
-        url: "https://synapse.cmn.dev".to_string(),
+        synapse_url: "https://synapse.cmn.dev".to_string(),
         token_secret: Some("tok".to_string()),
     };
     save_synapse_node("synapse.cmn.dev", &node).unwrap();
@@ -231,7 +330,7 @@ fn test_save_load_synapse_node() {
     }
 
     let loaded = load_synapse_node("synapse.cmn.dev").unwrap();
-    assert_eq!(loaded.url, "https://synapse.cmn.dev");
+    assert_eq!(loaded.synapse_url, "https://synapse.cmn.dev");
     assert_eq!(loaded.token_secret.as_deref(), Some("tok"));
 
     std::env::remove_var("CMN_HOME");
@@ -246,7 +345,7 @@ fn test_list_synapse_domains() {
     save_synapse_node(
         "beta.example.com",
         &SynapseNode {
-            url: "https://beta.example.com".to_string(),
+            synapse_url: "https://beta.example.com".to_string(),
             token_secret: None,
         },
     )
@@ -254,7 +353,7 @@ fn test_list_synapse_domains() {
     save_synapse_node(
         "alpha.example.com",
         &SynapseNode {
-            url: "https://alpha.example.com".to_string(),
+            synapse_url: "https://alpha.example.com".to_string(),
             token_secret: None,
         },
     )
@@ -275,7 +374,7 @@ fn test_remove_synapse_node() {
     save_synapse_node(
         "test.example.com",
         &SynapseNode {
-            url: "https://test.example.com".to_string(),
+            synapse_url: "https://test.example.com".to_string(),
             token_secret: None,
         },
     )
@@ -341,6 +440,17 @@ fn test_validate_synapse_url_rejects_known_cleartext_schemes() {
 }
 
 #[test]
+fn test_validate_synapse_url_rejects_and_redacts_userinfo() {
+    let password = "userinfo-password-canary";
+    let err =
+        validate_synapse_url(&format!("https://agent:{password}@synapse.cmn.dev")).unwrap_err();
+    assert_eq!(err.code, "invalid_synapse_url");
+    assert!(!err.message.contains(password));
+    assert!(err.message.contains("***"));
+    assert!(err.message.contains("--token-secret"));
+}
+
+#[test]
 fn test_validate_synapse_url_rejects_ip_literals() {
     for url in ["https://127.0.0.1", "https://[::1]", "https://203.0.113.10"] {
         assert_eq!(
@@ -361,7 +471,7 @@ fn test_resolve_synapse_env_var_override() {
     save_synapse_node(
         "test.example.com",
         &SynapseNode {
-            url: "https://test.example.com".to_string(),
+            synapse_url: "https://test.example.com".to_string(),
             token_secret: Some("config-token".to_string()),
         },
     )

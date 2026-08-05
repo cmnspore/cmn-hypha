@@ -242,7 +242,7 @@ pub async fn handle_spawn(
 ) -> ExitCode {
     let sink = crate::api::OutSink(out);
     match spawn(uri_str, path, vcs, dist_preference, bond, &sink).await {
-        Ok(output) => out.ok(serde_json::to_value(output).unwrap_or_default()),
+        Ok(output) => out.ok(output),
         Err(e) => out.error_hypha(&e),
     }
 }
@@ -388,7 +388,7 @@ async fn spawn_from_git_lib(
         .unwrap_or_else(|_| target_path.to_path_buf());
 
     Ok(crate::output::SpawnOutput {
-        uri: uri_str.to_string(),
+        cmn_url: uri_str.to_string(),
         name: name.to_string(),
         path: abs_path.display().to_string(),
         source_type: "git".to_string(),
@@ -523,7 +523,7 @@ async fn spawn_from_archive_lib(
         .unwrap_or_else(|_| target_path.to_path_buf());
 
     Ok(crate::output::SpawnOutput {
-        uri: uri_str.to_string(),
+        cmn_url: uri_str.to_string(),
         name: name.to_string(),
         path: abs_path.display().to_string(),
         source_type: "archive".to_string(),

@@ -59,7 +59,7 @@ fn test_mycelium_status() {
     env.hypha(&["mycelium", "root", "test.local"]);
 
     // Test plain output with --output plain
-    let output = env.hypha(&["--output", "plain", "mycelium", "status"]);
+    let output = env.hypha(&["mycelium", "status", "--output", "plain"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -697,10 +697,12 @@ fn test_archive_format_gzip_rejected() {
         "gzip generation should be rejected"
     );
     let stderr = combined_text(&output);
+    let event = parse_json_last_line(&stderr);
     assert!(
-        stderr.contains("INVALID_ARGS")
-            || stderr.contains("Unsupported archive format")
-            || stderr.contains("Use: zstd"),
+        event["error"]["code"] == "cli_invalid_argument_value"
+            && event["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("expected one of zstd")),
         "should report unsupported gzip generation: {}",
         stderr
     );
@@ -744,10 +746,12 @@ fn test_archive_format_xz_rejected() {
     );
     assert!(!output.status.success(), "xz generation should be rejected");
     let stderr = combined_text(&output);
+    let event = parse_json_last_line(&stderr);
     assert!(
-        stderr.contains("INVALID_ARGS")
-            || stderr.contains("Unsupported archive format")
-            || stderr.contains("Use: zstd"),
+        event["error"]["code"] == "cli_invalid_argument_value"
+            && event["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("expected one of zstd")),
         "should report unsupported xz generation: {}",
         stderr
     );
@@ -794,10 +798,12 @@ fn test_archive_format_zip_rejected() {
         "zip generation should be rejected"
     );
     let stderr = combined_text(&output);
+    let event = parse_json_last_line(&stderr);
     assert!(
-        stderr.contains("INVALID_ARGS")
-            || stderr.contains("Unsupported archive format")
-            || stderr.contains("Use: zstd"),
+        event["error"]["code"] == "cli_invalid_argument_value"
+            && event["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("expected one of zstd")),
         "should report unsupported zip generation: {}",
         stderr
     );
@@ -952,14 +958,17 @@ fn test_dist_git_requires_commit() {
     assert!(!output.status.success(), "should fail without dist-ref");
 
     let stderr = combined_text(&output);
-    assert!(
-        stderr.contains("invalid_args"),
-        "should return invalid_args: {}",
+    let event = parse_json_last_line(&stderr);
+    assert_eq!(
+        event["error"]["code"], "cli_unregistered_combination",
+        "should reject an unregistered release shape: {}",
         stderr
     );
     assert!(
-        stderr.contains("dist-ref"),
-        "should mention dist-ref: {}",
+        event["error"]["hint"]
+            .as_str()
+            .is_some_and(|hint| hint.contains("hypha release --help")),
+        "should point to the registered release shapes: {}",
         stderr
     );
 }

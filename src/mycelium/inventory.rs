@@ -16,7 +16,7 @@ use super::MyceliumError;
 pub(crate) struct ResolvedSporeRef {
     pub id: String,
     pub hash: String,
-    pub uri: String,
+    pub cmn_url: String,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub synopsis: Option<String>,
@@ -70,7 +70,7 @@ pub(crate) fn resolve_spore_ref(
     Ok(ResolvedSporeRef {
         id: spore.id.clone(),
         hash: spore.hash.clone(),
-        uri: build_spore_uri(domain, &spore.hash),
+        cmn_url: build_spore_uri(domain, &spore.hash),
         name: spore.name.clone(),
         synopsis: spore.synopsis.clone(),
         mycelium_hash,
@@ -447,7 +447,7 @@ mod tests {
 
         assert_eq!(resolved.id, "my-lib");
         assert_eq!(resolved.hash, "b3.spore");
-        assert_eq!(resolved.uri, "cmn://example.com/b3.spore");
+        assert_eq!(resolved.cmn_url, "cmn://example.com/b3.spore");
         assert_eq!(resolved.mycelium_hash.as_deref(), Some(mycelium_hash));
     }
 

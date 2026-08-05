@@ -21,7 +21,7 @@ fn reset_dir(dir: &std::path::Path) -> Result<(), crate::HyphaError> {
 /// Absorb source info for tracking
 #[derive(Serialize)]
 struct AbsorbSource {
-    uri: String,
+    cmn_url: String,
     hash: String,
     name: String,
     path: String,
@@ -95,7 +95,7 @@ pub async fn absorb(
         })?;
 
         let bonds = fetch_bonds(
-            &resolved.url,
+            &resolved.synapse_url,
             spawned_hash,
             "inbound",
             max_depth,
@@ -254,16 +254,18 @@ pub async fn absorb(
                             ));
                         }
                         Err(e) if e.is_malicious() => {
+                            let safe_url = agent_first_data::redact_url_secrets(&archive_url);
                             sink.emit(crate::HyphaEvent::Warn {
                                 message: format!(
                                     "Unverified content from {} was rejected: {}",
-                                    archive_url, e
+                                    safe_url, e
                                 ),
                             });
                         }
                         Err(e) => {
+                            let safe_url = agent_first_data::redact_url_secrets(&archive_url);
                             sink.emit(crate::HyphaEvent::Warn {
-                                message: format!("Failed to download from {}: {}", archive_url, e),
+                                message: format!("Failed to download from {}: {}", safe_url, e),
                             });
                         }
                     }
@@ -281,8 +283,9 @@ pub async fn absorb(
                         break;
                     }
                     Err(e) => {
+                        let safe_url = agent_first_data::redact_url_secrets(git_url);
                         sink.emit(crate::HyphaEvent::Warn {
-                            message: format!("Failed to clone from {}: {}", git_url, e),
+                            message: format!("Failed to clone from {}: {}", safe_url, e),
                         });
                     }
                 }
@@ -306,7 +309,7 @@ pub async fn absorb(
         )?;
 
         sources.push(AbsorbSource {
-            uri: format!("cmn://{}/{}", uri.domain, hash),
+            cmn_url: format!("cmn://{}/{}", uri.domain, hash),
             hash: hash.clone(),
             name: name.to_string(),
             path: format!(".cmn/absorb/{}/", hash),
@@ -325,7 +328,7 @@ pub async fn absorb(
         sources: sources
             .iter()
             .map(|s| crate::output::AbsorbSourceInfo {
-                uri: s.uri.clone(),
+                cmn_url: s.cmn_url.clone(),
                 hash: s.hash.clone(),
                 name: s.name.clone(),
                 path: s.path.clone(),
@@ -354,7 +357,7 @@ pub async fn handle_absorb(
     )
     .await
     {
-        Ok(output) => out.ok(serde_json::to_value(output).unwrap_or_default()),
+        Ok(output) => out.ok(output),
         Err(e) => out.error_hypha(&e),
     }
 }
@@ -508,7 +511,7 @@ fn generate_absorb_prompt(
         writeln!(file, "### Source {}: {}", i + 1, source.name)?;
         writeln!(file, "| Field | Value |")?;
         writeln!(file, "|-------|-------|")?;
-        writeln!(file, "| URI | `{}` |", source.uri)?;
+        writeln!(file, "| URI | `{}` |", source.cmn_url)?;
         writeln!(file, "| Name | {} |", source.name)?;
         writeln!(file, "| Manifest | `{}spore.json` |", source.path)?;
         writeln!(file, "| Code | `{}content/` |", source.path)?;
@@ -678,7 +681,7 @@ fn generate_absorb_prompt(
         writeln!(
             file,
             "    {{ \"uri\": \"{}\", \"relation\": \"absorbed_from\" }},",
-            source.uri
+            source.cmn_url
         )?;
     }
     writeln!(file, "  ]")?;

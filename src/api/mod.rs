@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 use std::process::ExitCode;
-use std::sync::{mpsc, Mutex};
+use std::sync::{Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
@@ -98,10 +98,10 @@ fn redact_embedded_cmn_urls(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(fields) => {
             for (name, field) in fields {
-                if name == "url" {
-                    if let serde_json::Value::String(raw_url) = field {
-                        *raw_url = agent_first_data::redact_url_secrets(raw_url);
-                    }
+                if name == "url"
+                    && let serde_json::Value::String(raw_url) = field
+                {
+                    *raw_url = agent_first_data::redact_url_secrets(raw_url);
                 }
                 redact_embedded_cmn_urls(field);
             }
@@ -122,10 +122,10 @@ fn redact_url_selectors(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(fields) => {
             for (name, field) in fields {
-                if name == "synapse_selector" {
-                    if let serde_json::Value::String(selector) = field {
-                        *selector = redact_urls_in_text(selector);
-                    }
+                if name == "synapse_selector"
+                    && let serde_json::Value::String(selector) = field
+                {
+                    *selector = redact_urls_in_text(selector);
                 }
                 redact_url_selectors(field);
             }
@@ -253,7 +253,7 @@ impl Output {
                 return self.error(
                     "serialize_error",
                     &format!("Failed to serialize command result: {err}"),
-                )
+                );
             }
         };
         let mut trace_value = match serde_json::to_value(&trace) {
@@ -262,13 +262,13 @@ impl Output {
                 return self.error(
                     "serialize_error",
                     "Command trace must serialize as an object",
-                )
+                );
             }
             Err(err) => {
                 return self.error(
                     "serialize_error",
                     &format!("Failed to serialize command trace: {err}"),
-                )
+                );
             }
         };
         redact_boundary_values(&mut result_value);
@@ -431,7 +431,7 @@ impl Output {
 
         let env = serde_json::json!({
             "CMN_HOME": std::env::var("CMN_HOME").ok(),
-            "SYNAPSE_TOKEN_SECRET": std::env::var("SYNAPSE_TOKEN_SECRET").ok(),
+            "SYNAPSE_TOKEN_SECRET": crate::env::var("SYNAPSE_TOKEN_SECRET").ok(),
         });
         self.log_data(
             "info",
@@ -451,10 +451,10 @@ impl Output {
 impl Drop for Output {
     fn drop(&mut self) {
         let _ = self.sender.send(OutputMessage::Shutdown);
-        if let Ok(worker) = self.worker.get_mut() {
-            if let Some(worker) = worker.take() {
-                let _ = worker.join();
-            }
+        if let Ok(worker) = self.worker.get_mut()
+            && let Some(worker) = worker.take()
+        {
+            let _ = worker.join();
         }
     }
 }

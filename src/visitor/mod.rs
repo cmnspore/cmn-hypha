@@ -75,9 +75,9 @@ impl From<substrate::archive::ExtractError> for ExtractError {
 // Re-export extract module items for internal use
 use extract::LimitedWriter;
 pub(crate) use extract::{
-    decode_delta_to_raw_tar_file, download_and_extract_to_dir, download_file,
-    ensure_no_rejected_path_components, load_old_archive_dictionary, rejected_path_component,
-    DeltaByteBudget, ExtractLimits,
+    DeltaByteBudget, ExtractLimits, decode_delta_to_raw_tar_file, download_and_extract_to_dir,
+    download_file, ensure_no_rejected_path_components, load_old_archive_dictionary,
+    rejected_path_component,
 };
 
 // Re-export all public items so external callers don't break

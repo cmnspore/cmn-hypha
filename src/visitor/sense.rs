@@ -105,7 +105,7 @@ fn with_resolved_trace(
                     format!("Failed to serialize resolved spore metadata: {e}"),
                 )
             })?;
-            if let (serde_json::Value::Object(ref mut resolved_fields), Some(verified)) =
+            if let (serde_json::Value::Object(resolved_fields), Some(verified)) =
                 (&mut resolved_value, mycelium_verified)
             {
                 resolved_fields.insert("mycelium_verified".to_string(), verified);
@@ -160,10 +160,10 @@ where
         .map(|u| u.domain)
         .unwrap_or_default();
     let domain_cache = CacheDir::new()?.domain(&domain);
-    if can_synapse_fallback(&domain_cache, &capsule.key, &cfg.cache) {
-        if let Some((synapse_url, synapse_token)) = resolve_default_synapse_url(&cfg) {
-            return fetch(synapse_url, synapse_token).await;
-        }
+    if can_synapse_fallback(&domain_cache, &capsule.key, &cfg.cache)
+        && let Some((synapse_url, synapse_token)) = resolve_default_synapse_url(&cfg)
+    {
+        return fetch(synapse_url, synapse_token).await;
     }
     Err(domain_err)
 }
@@ -180,78 +180,78 @@ async fn sense_mycelium_data(
     })?;
 
     let mut fallback: Option<&str> = None;
-    let manifest = match substrate::client::fetch_mycelium(&client, capsule, fetch_opts(None)).await
-    {
-        Ok(m) => m,
-        Err(domain_err) => {
-            let domain_err = crate::HyphaError::new("manifest_failed", domain_err.to_string());
-            let domain_err_str = domain_err.message.clone();
-            let domain = CmnUri::parse(&capsule.uri)
-                .map(|u| u.domain)
-                .unwrap_or_default();
-            let m = with_synapse_fallback(
-                capsule,
-                domain_err,
-                |synapse_url, synapse_token| async move {
-                    // Fetch cmn.json from synapse, then get mycelium by hash.
-                    let cmn_resp = substrate::client::fetch_synapse_cmn(
-                        &client,
-                        &synapse_url,
-                        &domain,
-                        fetch_opts(synapse_token.as_deref()),
-                    )
-                    .await
-                    .map_err(|e| {
-                        crate::HyphaError::new(
-                            "manifest_failed",
-                            format!("Domain: {domain_err_str}; Synapse cmn: {e}"),
+    let manifest =
+        match substrate::client::fetch_mycelium(&client, capsule, fetch_opts(None)?).await {
+            Ok(m) => m,
+            Err(domain_err) => {
+                let domain_err = crate::HyphaError::new("manifest_failed", domain_err.to_string());
+                let domain_err_str = domain_err.message.clone();
+                let domain = CmnUri::parse(&capsule.uri)
+                    .map(|u| u.domain)
+                    .unwrap_or_default();
+                let m = with_synapse_fallback(
+                    capsule,
+                    domain_err,
+                    |synapse_url, synapse_token| async move {
+                        // Fetch cmn.json from synapse, then get mycelium by hash.
+                        let cmn_resp = substrate::client::fetch_synapse_cmn(
+                            &client,
+                            &synapse_url,
+                            &domain,
+                            fetch_opts(synapse_token.as_deref())?,
                         )
-                    })?;
-                    // Validate the untrusted synapse cmn.json against the schema
-                    // before relying on any of its fields.
-                    substrate::validate_schema(&cmn_resp.result.cmn).map_err(|e| {
-                        crate::HyphaError::new(
-                            "manifest_failed",
-                            format!("Synapse cmn.json failed schema validation: {e}"),
-                        )
-                    })?;
-                    let cmn_entry: substrate::CmnEntry =
-                        serde_json::from_value(cmn_resp.result.cmn).map_err(|e| {
+                        .await
+                        .map_err(|e| {
                             crate::HyphaError::new(
                                 "manifest_failed",
-                                format!("Failed to parse synapse cmn.json: {e}"),
+                                format!("Domain: {domain_err_str}; Synapse cmn: {e}"),
                             )
                         })?;
-                    let cmn_capsule = cmn_entry
-                        .primary_capsule()
-                        .map_err(|e| crate::HyphaError::new("manifest_failed", e.to_string()))?;
-                    let mycelium_hash = cmn_capsule.mycelium_hash().ok_or_else(|| {
-                        crate::HyphaError::new(
-                            "manifest_failed",
-                            "No mycelium hash in synapse cmn.json",
+                        // Validate the untrusted synapse cmn.json against the schema
+                        // before relying on any of its fields.
+                        substrate::validate_schema(&cmn_resp.result.cmn).map_err(|e| {
+                            crate::HyphaError::new(
+                                "manifest_failed",
+                                format!("Synapse cmn.json failed schema validation: {e}"),
+                            )
+                        })?;
+                        let cmn_entry: substrate::CmnEntry =
+                            serde_json::from_value(cmn_resp.result.cmn).map_err(|e| {
+                                crate::HyphaError::new(
+                                    "manifest_failed",
+                                    format!("Failed to parse synapse cmn.json: {e}"),
+                                )
+                            })?;
+                        let cmn_capsule = cmn_entry.primary_capsule().map_err(|e| {
+                            crate::HyphaError::new("manifest_failed", e.to_string())
+                        })?;
+                        let mycelium_hash = cmn_capsule.mycelium_hash().ok_or_else(|| {
+                            crate::HyphaError::new(
+                                "manifest_failed",
+                                "No mycelium hash in synapse cmn.json",
+                            )
+                        })?;
+                        let myc_resp = substrate::client::fetch_synapse_mycelium_by_hash(
+                            &client,
+                            &synapse_url,
+                            mycelium_hash,
+                            fetch_opts(synapse_token.as_deref())?,
                         )
-                    })?;
-                    let myc_resp = substrate::client::fetch_synapse_mycelium_by_hash(
-                        &client,
-                        &synapse_url,
-                        mycelium_hash,
-                        fetch_opts(synapse_token.as_deref()),
-                    )
-                    .await
-                    .map_err(|e| {
-                        crate::HyphaError::new(
-                            "manifest_failed",
-                            format!("Domain: {domain_err_str}; Synapse mycelium: {e}"),
-                        )
-                    })?;
-                    Ok(myc_resp.result.mycelium)
-                },
-            )
-            .await?;
-            fallback = Some("synapse");
-            m
-        }
-    };
+                        .await
+                        .map_err(|e| {
+                            crate::HyphaError::new(
+                                "manifest_failed",
+                                format!("Domain: {domain_err_str}; Synapse mycelium: {e}"),
+                            )
+                        })?;
+                        Ok(myc_resp.result.mycelium)
+                    },
+                )
+                .await?;
+                fallback = Some("synapse");
+                m
+            }
+        };
 
     let pk = &capsule.key;
     let core_ok = verify_manifest_core_signature(&manifest, pk).is_ok();
@@ -287,7 +287,7 @@ async fn sense_spore_data(
                         &client,
                         &synapse_url,
                         hash,
-                        fetch_opts(synapse_token.as_deref()),
+                        fetch_opts(synapse_token.as_deref())?,
                     )
                     .await
                     .map_err(|e| {
@@ -306,7 +306,10 @@ async fn sense_spore_data(
     };
 
     let host_key = &capsule.key;
-    let core_ok = verify_manifest_core_signature(&manifest, host_key).is_ok();
+    let author_key = embedded_spore_author_key(&manifest);
+    let core_ok =
+        verify_manifest_core_signature(&manifest, author_key.as_deref().unwrap_or(host_key))
+            .is_ok();
     let capsule_ok = verify_manifest_capsule_signature(&manifest, host_key).is_ok();
     warn_if_unverified(sink, core_ok, capsule_ok, fallback);
     let trace = with_verified_trace(trace, core_ok, capsule_ok, fallback);

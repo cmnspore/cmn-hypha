@@ -154,7 +154,7 @@ cmn_ttl_s = 0
 fn test_config_save_load() {
     let _lock = super::ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     let mut cfg = HyphaConfig::default();
     cfg.defaults.synapse_domain = Some("synapse.cmn.dev".to_string());
@@ -168,7 +168,7 @@ fn test_config_save_load() {
     );
     assert_eq!(loaded.cache.cmn_ttl_s, 999);
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn test_config_save_preserves_existing_toml_source() {
         "# operator note\n\n[defaults]\ndomain = 'example.com' # keep quote style\n\n[cache]\ncmn_ttl_s   = 60 # tuned\n",
     )
     .unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     let mut cfg = HyphaConfig::load().unwrap();
     cfg.cache.cmn_ttl_s = 90;
@@ -193,7 +193,7 @@ fn test_config_save_preserves_existing_toml_source() {
     assert!(source.contains("domain = 'example.com' # keep quote style"));
     assert!(source.contains("cmn_ttl_s   = 90 # tuned"));
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[cfg(unix)]
@@ -206,7 +206,7 @@ fn test_config_save_refuses_symlink_target() {
     let target = dir.path().join("real-config.toml");
     std::fs::write(&target, "[cache]\ncmn_ttl_s = 60\n").unwrap();
     std::os::unix::fs::symlink(&target, hypha_dir.join("config.toml")).unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     let mut cfg = HyphaConfig::load().unwrap();
     cfg.cache.cmn_ttl_s = 90;
@@ -219,7 +219,7 @@ fn test_config_save_refuses_symlink_target() {
         "[cache]\ncmn_ttl_s = 60\n"
     );
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[cfg(unix)]
@@ -232,7 +232,7 @@ fn test_config_save_refuses_hardlinked_target() {
     let target = dir.path().join("real-config.toml");
     std::fs::write(&target, "[cache]\ncmn_ttl_s = 60\n").unwrap();
     std::fs::hard_link(&target, hypha_dir.join("config.toml")).unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     let mut cfg = HyphaConfig::load().unwrap();
     cfg.cache.cmn_ttl_s = 90;
@@ -245,7 +245,7 @@ fn test_config_save_refuses_hardlinked_target() {
         "[cache]\ncmn_ttl_s = 60\n"
     );
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn test_config_load_invalid_file_returns_error() {
     let hypha_dir = dir.path().join("hypha");
     std::fs::create_dir_all(&hypha_dir).unwrap();
     std::fs::write(hypha_dir.join("config.toml"), "this is not valid toml {{{{").unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     let err = HyphaConfig::load().unwrap_err();
     assert_eq!(err.code, "config_parse_failed");
@@ -265,7 +265,7 @@ fn test_config_load_invalid_file_returns_error() {
         Some("fix the configuration file or its permissions and retry")
     );
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[test]
@@ -298,7 +298,7 @@ fn test_synapse_node_no_token() {
 fn test_save_load_synapse_node() {
     let _lock = super::ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     let node = SynapseNode {
         synapse_url: "https://synapse.cmn.dev".to_string(),
@@ -333,14 +333,14 @@ fn test_save_load_synapse_node() {
     assert_eq!(loaded.synapse_url, "https://synapse.cmn.dev");
     assert_eq!(loaded.token_secret.as_deref(), Some("tok"));
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[test]
 fn test_list_synapse_domains() {
     let _lock = super::ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     save_synapse_node(
         "beta.example.com",
@@ -362,14 +362,14 @@ fn test_list_synapse_domains() {
     let domains = list_synapse_domains();
     assert_eq!(domains, vec!["alpha.example.com", "beta.example.com"]);
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[test]
 fn test_remove_synapse_node() {
     let _lock = super::ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     save_synapse_node(
         "test.example.com",
@@ -386,7 +386,7 @@ fn test_remove_synapse_node() {
     assert!(load_synapse_node("test.example.com").is_none());
     assert!(list_synapse_domains().is_empty());
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[test]
@@ -411,9 +411,10 @@ fn test_domain_from_url() {
 fn test_validate_synapse_url_rejects_clearnet_http() {
     let err = validate_synapse_url("http://synapse.cmn.dev").unwrap_err();
     assert_eq!(err.code, "invalid_synapse_url");
-    assert!(err
-        .message
-        .contains("Insecure cleartext transport rejected"));
+    assert!(
+        err.message
+            .contains("Insecure cleartext transport rejected")
+    );
 }
 
 #[test]
@@ -466,7 +467,7 @@ fn test_validate_synapse_url_rejects_ip_literals() {
 fn test_resolve_synapse_env_var_override() {
     let _lock = super::ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     save_synapse_node(
         "test.example.com",
@@ -477,7 +478,7 @@ fn test_resolve_synapse_env_var_override() {
     )
     .unwrap();
 
-    std::env::set_var("SYNAPSE_TOKEN_SECRET", "env-token");
+    crate::env::set_var("SYNAPSE_TOKEN_SECRET", "env-token");
     let resolved = resolve_synapse(Some("test.example.com"), None).unwrap();
     assert_eq!(resolved.token_secret.as_deref(), Some("env-token"));
 
@@ -487,21 +488,21 @@ fn test_resolve_synapse_env_var_override() {
     let resolved = resolve_synapse(Some("test.example.com"), Some("")).unwrap();
     assert!(resolved.token_secret.is_none());
 
-    std::env::remove_var("SYNAPSE_TOKEN_SECRET");
+    crate::env::remove_var("SYNAPSE_TOKEN_SECRET");
 
     let resolved = resolve_synapse(Some("test.example.com"), None).unwrap();
     assert_eq!(resolved.token_secret.as_deref(), Some("config-token"));
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }
 
 #[test]
 fn test_load_missing_node_returns_none() {
     let _lock = super::ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
 
     assert!(load_synapse_node("nonexistent.example.com").is_none());
 
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 }

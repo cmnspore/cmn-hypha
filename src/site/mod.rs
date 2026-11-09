@@ -32,7 +32,7 @@ pub fn validate_site_domain_path(domain: &str) -> Result<(), crate::sink::HyphaE
 
 /// Get the CMN base directory (~/.cmn or CMN_HOME)
 pub fn get_cmn_home() -> PathBuf {
-    if let Ok(home) = std::env::var("CMN_HOME") {
+    if let Ok(home) = crate::env::var("CMN_HOME") {
         PathBuf::from(home)
     } else {
         dirs::home_dir()
@@ -182,13 +182,13 @@ pub fn list_domains() -> Vec<String> {
 
     if let Ok(entries) = fs::read_dir(&sites_dir) {
         for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                if let Some(name) = entry.file_name().to_str() {
-                    // Check if it has keys
-                    let site = SiteDir::new(name);
-                    if site.private_key_path().exists() {
-                        domains.push(name.to_string());
-                    }
+            if entry.path().is_dir()
+                && let Some(name) = entry.file_name().to_str()
+            {
+                // Check if it has keys
+                let site = SiteDir::new(name);
+                if site.private_key_path().exists() {
+                    domains.push(name.to_string());
                 }
             }
         }

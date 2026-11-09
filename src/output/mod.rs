@@ -195,7 +195,7 @@ pub enum BondResult {
     TasteRequired(BondTasteRequired),
 }
 
-// ───────────────────────── bonds (ancestors / lineage) ────
+// ───────────────────────── lineage ────────────────────────
 
 /// A node in the bond graph (ancestor or descendant).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,7 +209,7 @@ pub struct LineageNode {
     pub relation: substrate::BondRelation,
 }
 
-/// Result of `bonds`.
+/// Result of `lineage`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BondsOutput {
     pub cmn_url: String,

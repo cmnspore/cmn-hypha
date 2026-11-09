@@ -26,7 +26,7 @@ pub(super) async fn pull_from_git_lib(
             return Err(crate::HyphaError::new(
                 "grow_error",
                 "New spore version has no git distribution",
-            ))
+            ));
         }
     };
 
@@ -46,10 +46,13 @@ pub(super) async fn pull_from_git_lib(
             .ok()
             .is_some_and(|u| u.scheme() == "http" || u.scheme() == "https");
         if old_is_http && new_git_url != old_url_clean {
-            return Err(crate::HyphaError::new("GIT_URL_CHANGED", format!(
-                "Git repository URL has changed:\n  Original: {}\n  Current:  {}\n\nUse 'hypha spawn' to spawn the new repository.",
-                old_url_clean, new_git_url
-            )));
+            return Err(crate::HyphaError::new(
+                "GIT_URL_CHANGED",
+                format!(
+                    "Git repository URL has changed:\n  Original: {}\n  Current:  {}\n\nUse 'hypha spawn' to spawn the new repository.",
+                    old_url_clean, new_git_url
+                ),
+            ));
         }
     }
 
@@ -77,10 +80,13 @@ pub(super) async fn pull_from_git_lib(
     match crate::git::commit_exists(&bare_repo_path, &root_commit) {
         Ok(true) => {}
         Ok(false) => {
-            return Err(crate::HyphaError::new("REPO_IDENTITY_ERR", format!(
-                "Repository identity mismatch! Root commit {} not found.\nUse 'hypha spawn' to spawn fresh.",
-                root_commit
-            )));
+            return Err(crate::HyphaError::new(
+                "REPO_IDENTITY_ERR",
+                format!(
+                    "Repository identity mismatch! Root commit {} not found.\nUse 'hypha spawn' to spawn fresh.",
+                    root_commit
+                ),
+            ));
         }
         Err(e) => {
             return Err(crate::HyphaError::new(

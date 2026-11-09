@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::{files::write_text_file_atomic, hypha_dir, HyphaConfig};
+use super::{HyphaConfig, files::write_text_file_atomic, hypha_dir};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -303,7 +303,7 @@ pub fn resolve_synapse(
         }
     };
 
-    if let Ok(ts) = std::env::var("SYNAPSE_TOKEN_SECRET") {
+    if let Ok(ts) = crate::env::var("SYNAPSE_TOKEN_SECRET") {
         resolved.token_secret = if ts.is_empty() { None } else { Some(ts) };
     }
 

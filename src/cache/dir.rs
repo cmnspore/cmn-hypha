@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::sink::HyphaError;
 
 use super::{
-    dir_size, read_spore_metadata, CachedSpore, DomainCache, HyphaConfig, TasteVerdictCache,
+    CachedSpore, DomainCache, HyphaConfig, TasteVerdictCache, dir_size, read_spore_metadata,
 };
 
 /// Marker file written into cache directories that hypha created itself.
@@ -67,7 +67,7 @@ impl CacheDir {
 
         Ok(Self {
             root,
-            cmn_ttl_ms: cfg.cache.cmn_ttl_s * 1000,
+            cmn_ttl_ms: cfg.cache.cmn_ttl_s.saturating_mul(1000),
             spore_max_download_bytes: cfg.cache.spore_max_download_bytes,
             spore_max_extract_bytes: cfg.cache.spore_max_extract_bytes,
             spore_max_extract_files: cfg.cache.spore_max_extract_files,
@@ -212,6 +212,32 @@ impl CacheDir {
             spore_max_extract_files: 100_000,
             spore_max_extract_file_bytes: 256 * 1024 * 1024,
             spore_reject_path_components: vec![".git".to_string(), ".cmn".to_string()],
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod ttl_tests {
+    use super::*;
+
+    #[test]
+    fn oversized_ttl_saturates_instead_of_wrapping_or_panicking() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = HyphaConfig::default();
+        config.cache.path = Some(directory.path().display().to_string());
+        for (seconds, milliseconds) in [
+            (0, 0),
+            (30, 30_000),
+            (u64::MAX / 1000, u64::MAX / 1000 * 1000),
+            (u64::MAX / 1000 + 1, u64::MAX),
+            (i64::MAX as u64, u64::MAX),
+        ] {
+            config.cache.cmn_ttl_s = seconds;
+            assert_eq!(
+                CacheDir::from_config(&config).unwrap().cmn_ttl_ms,
+                milliseconds,
+            );
         }
     }
 }

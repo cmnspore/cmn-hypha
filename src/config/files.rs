@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use agent_first_data::document::{Document, DocumentError, DocumentFile, Format, Value};
+use agent_first_data::document::{
+    CreateOptions, Document, DocumentError, DocumentFile, Format, Value,
+};
 
 use super::HyphaConfig;
 
@@ -89,13 +91,19 @@ impl HyphaConfig {
 
         match std::fs::symlink_metadata(&path) {
             Ok(_) => save_existing_config(&path, &desired, &defaults),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => write_text_file_atomic(
-                &path,
-                desired.source(),
-                0o600,
-                "config_save_failed",
-                "config.toml",
-            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let options = CreateOptions::new().unix_mode(0o600);
+                DocumentFile::create_atomic(&path, desired, options)
+                    .map(|_| ())
+                    .map_err(|error| {
+                        config_document_error(
+                            "config_save_failed",
+                            &path,
+                            "create configuration",
+                            &error,
+                        )
+                    })
+            }
             Err(error) => Err(HyphaError::with_hint(
                 "config_save_failed",
                 format!("Failed to inspect {}: {}", path.display(), error),
@@ -113,7 +121,6 @@ fn save_existing_config(
     let mut current = DocumentFile::open_capped(path, Some(Format::Toml), CONFIG_MAX_BYTES)
         .map_err(|error| config_load_error(path, &error))?;
     let mut changed = false;
-    let mut collection_updates = Vec::new();
 
     for key in CONFIG_KEYS {
         let desired_value = optional_value(desired, key).map_err(|error| {
@@ -145,18 +152,14 @@ fn save_existing_config(
             (Some(desired_value), Some(current_value)) if desired_value == current_value => {}
             (Some(desired_value), None) if Some(&desired_value) == default_value.as_ref() => {}
             (Some(desired_value), _) => {
-                if desired_value.is_array() || desired_value.is_object() {
-                    collection_updates.push((*key, desired_value));
-                } else {
-                    current.set(key, desired_value).map_err(|error| {
-                        config_document_error(
-                            "config_save_failed",
-                            path,
-                            "stage configuration update",
-                            &error,
-                        )
-                    })?;
-                }
+                current.set(key, desired_value).map_err(|error| {
+                    config_document_error(
+                        "config_save_failed",
+                        path,
+                        "stage configuration update",
+                        &error,
+                    )
+                })?;
                 changed = true;
             }
             (None, Some(_)) => {
@@ -178,44 +181,7 @@ fn save_existing_config(
         return Ok(());
     }
 
-    if collection_updates.is_empty() {
-        agent_first_data::document::from_value::<HyphaConfig>(current.value(), "").map_err(
-            |error| {
-                config_document_error(
-                    "config_save_failed",
-                    path,
-                    "validate updated configuration",
-                    &error,
-                )
-            },
-        )?;
-        return current.save().map_err(|error| {
-            config_document_error("config_save_failed", path, "commit configuration", &error)
-        });
-    }
-
-    current.ensure_mutable("set").map_err(|error| {
-        config_document_error(
-            "config_save_failed",
-            path,
-            "preflight collection update",
-            &error,
-        )
-    })?;
-    let mut source = current.source().to_string();
-    for (key, value) in collection_updates {
-        source = set_toml_collection(&source, key, &value).map_err(|error| {
-            crate::sink::HyphaError::new(
-                "config_save_failed",
-                format!(
-                    "Failed to stage collection update at {}: {}",
-                    path.display(),
-                    error
-                ),
-            )
-        })?;
-    }
-    let validated = Document::parse(&source, Format::Toml).map_err(|error| {
+    current.decode::<HyphaConfig>().map_err(|error| {
         config_document_error(
             "config_save_failed",
             path,
@@ -223,62 +189,9 @@ fn save_existing_config(
             &error,
         )
     })?;
-    agent_first_data::document::from_value::<HyphaConfig>(validated.value(), "").map_err(
-        |error| {
-            config_document_error(
-                "config_save_failed",
-                path,
-                "validate updated configuration types",
-                &error,
-            )
-        },
-    )?;
-    write_text_file_atomic(
-        path,
-        validated.source(),
-        0o600,
-        "config_save_failed",
-        "config.toml",
-    )
-}
-
-fn set_toml_collection(source: &str, key: &str, value: &Value) -> Result<String, &'static str> {
-    if key != "cache.spore_reject_path_components" {
-        return Err("no dedicated editor is registered for this collection field");
-    }
-    let items = value
-        .as_array()
-        .ok_or("spore_reject_path_components must be an array")?;
-    let mut array = toml_edit::Array::new();
-    for item in items {
-        let item = item
-            .as_str()
-            .ok_or("spore_reject_path_components entries must be strings")?;
-        array.push(item);
-    }
-
-    let mut document = source
-        .parse::<toml_edit::DocumentMut>()
-        .map_err(|_| "existing TOML could not be parsed by the collection editor")?;
-    if document.get("cache").is_none() {
-        document.insert("cache", toml_edit::Item::Table(toml_edit::Table::new()));
-    }
-    let cache = document
-        .get_mut("cache")
-        .and_then(toml_edit::Item::as_table_like_mut)
-        .ok_or("cache must be a TOML table")?;
-    let mut replacement = toml_edit::value(array);
-    if let Some(decor) = cache
-        .get("spore_reject_path_components")
-        .and_then(toml_edit::Item::as_value)
-        .map(|value| value.decor().clone())
-    {
-        if let Some(value) = replacement.as_value_mut() {
-            *value.decor_mut() = decor;
-        }
-    }
-    cache.insert("spore_reject_path_components", replacement);
-    Ok(document.to_string())
+    current.save().map_err(|error| {
+        config_document_error("config_save_failed", path, "commit configuration", &error)
+    })
 }
 
 fn optional_value(doc: &Document, key: &str) -> Result<Option<Value>, DocumentError> {
@@ -324,7 +237,6 @@ pub(super) fn write_text_file_atomic(
     file_label: &str,
 ) -> Result<(), crate::sink::HyphaError> {
     use crate::sink::HyphaError;
-    use std::io::Write;
 
     let parent = path.parent().ok_or_else(|| {
         HyphaError::new(
@@ -332,75 +244,8 @@ pub(super) fn write_text_file_atomic(
             format!("Failed to determine parent directory for {}", file_label),
         )
     })?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("tmp");
-    let tmp_path = parent.join(format!(
-        ".{}.tmp.{}.{}",
-        file_name,
-        std::process::id(),
-        crate::time::now_epoch_ms()
-    ));
-
-    #[cfg(unix)]
-    let mut file = {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .mode(mode)
-            .open(&tmp_path)
-            .map_err(|e| {
-                HyphaError::new(
-                    error_code,
-                    format!("Failed to create temp {}: {}", file_label, e),
-                )
-            })?
-    };
-
-    #[cfg(not(unix))]
-    let mut file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&tmp_path)
-        .map_err(|e| {
-            HyphaError::new(
-                error_code,
-                format!("Failed to create temp {}: {}", file_label, e),
-            )
-        })?;
-
-    if let Err(e) = file.write_all(content.as_bytes()) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(HyphaError::new(
-            error_code,
-            format!("Failed to write temp {}: {}", file_label, e),
-        ));
-    }
-    if let Err(e) = file.sync_all() {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(HyphaError::new(
-            error_code,
-            format!("Failed to sync temp {}: {}", file_label, e),
-        ));
-    }
-    drop(file);
-
-    std::fs::rename(&tmp_path, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp_path);
-        HyphaError::new(
-            error_code,
-            format!("Failed to replace {}: {}", file_label, e),
-        )
-    })?;
-
-    // fsync the directory so the rename itself survives a crash.
-    if let Ok(handle) = std::fs::File::open(parent) {
-        let _ = handle.sync_all();
-    }
-    Ok(())
+    crate::cache::fs::atomic_write_file(path, content.as_bytes(), parent, Some(mode))
+        .map_err(|e| HyphaError::new(error_code, format!("Failed to write {}: {}", file_label, e)))
 }
 
 pub fn config_path() -> PathBuf {

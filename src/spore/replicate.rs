@@ -6,7 +6,7 @@ use crate::auth;
 use crate::cache::CacheDir;
 use crate::site::{self, SiteDir};
 use crate::visitor;
-use substrate::{CmnUri, PrettyJson, Spore, SporeCapsule, SporeCore, SPORE_SCHEMA};
+use substrate::{CmnUri, PrettyJson, SPORE_SCHEMA, Spore, SporeCapsule, SporeCore};
 
 /// Handle the `replicate` command — copy spores to your domain (same hash, re-signed capsule)
 #[allow(clippy::too_many_arguments)]
@@ -19,10 +19,10 @@ pub async fn handle_replicate(
 ) -> ExitCode {
     let now_epoch_ms = crate::time::now_epoch_ms();
 
-    if site_path.is_none() {
-        if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error_hypha(&e);
-        }
+    if site_path.is_none()
+        && let Err(e) = site::validate_site_domain_path(domain)
+    {
+        return out.error_hypha(&e);
     }
 
     let site = SiteDir::from_args(domain, site_path);
@@ -51,7 +51,7 @@ pub async fn handle_replicate(
                 return out.error(
                     "REPLICATE_ERR",
                     &format!("Failed to read spore.core.json: {}", e),
-                )
+                );
             }
         };
         let core: SporeCore = match serde_json::from_str(&content) {
@@ -60,7 +60,7 @@ pub async fn handle_replicate(
                 return out.error(
                     "REPLICATE_ERR",
                     &format!("Failed to parse spore.core.json: {}", e),
-                )
+                );
             }
         };
         let collected: Vec<String> = core
@@ -241,7 +241,7 @@ pub async fn handle_replicate(
                 return out.error(
                     "serialize_error",
                     &format!("Failed to format spore manifest: {}", e),
-                )
+                );
             }
         };
 

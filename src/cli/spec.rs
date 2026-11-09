@@ -4,8 +4,8 @@
 //! combinations, output contracts, help-v2, and the generated CLI reference.
 
 use agent_first_data::{
-    build_afdata_cli, ArgSpec, BuiltCliSpec, CliSpec, CliSpecError, Combination, CommandSpec,
-    OutputSpec,
+    ArgSpec, BuiltCliSpec, CliSpec, CliSpecError, Combination, CommandSpec, OutputSpec,
+    build_afdata_cli,
 };
 
 const VERDICTS: [&str; 5] = ["sweet", "fresh", "safe", "rotten", "toxic"];
@@ -408,11 +408,24 @@ fn hatch_bond_sync() -> CommandSpec {
         ["hatch", "bond", "sync"],
         "Reconcile one relation to a declarative JSON spec",
     )
-    .req(ArgSpec::option("--relation", "RELATION").about("Relation to reconcile"))
-    .req(ArgSpec::option("--spec", "PATH_OR_JSON").about("JSON spec file, inline JSON, or stdin"))
-    .opt(ArgSpec::option("--domain", "DOMAIN").about("Domain used to resolve omitted URIs"))
+    .req(ArgSpec::option("--relation", "RELATION").about(
+        "Relation to reconcile; a desired URI in another relation is an error",
+    ))
+    .req(ArgSpec::option("--spec", "PATH_OR_STDIN").about(
+        "JSON array [{id, domain?, reason?, with?, uri?}] from file or stdin (-); spec order is preserved and with is replaced",
+    ))
+    .opt(ArgSpec::option("--domain", "DOMAIN").about(
+        "Domain used to resolve omitted URIs for entries without their own domain",
+    ))
     .opt(site_path())
-    .opt(ArgSpec::flag("--check").about("Report drift without writing"))
+    .opt(
+        ArgSpec::option("--site", "DOMAIN=PATH")
+            .repeatable()
+            .about("Mycelium site directory for entries on DOMAIN; repeat per domain"),
+    )
+    .opt(ArgSpec::flag("--check").about(
+        "Report drift without writing; exit 7 includes order changes (reordered=true)",
+    ))
     .single("sync", "hatch_bond_sync")
 }
 

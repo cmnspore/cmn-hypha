@@ -3,6 +3,58 @@ mod common;
 use common::*;
 use std::fs;
 
+#[cfg(unix)]
+#[test]
+fn test_bond_index_write_failure_errors_in_main_and_clean() {
+    use std::os::unix::fs::symlink;
+
+    let env = TestEnv::new();
+    let work_dir = env.dir.join("bond-save-failure");
+    let refs_dir = work_dir.join(".cmn/bonds");
+    fs::create_dir_all(refs_dir.join("legacy")).unwrap();
+    let hash = "b3.3yMR7vZQ9hL";
+    let uri = format!("cmn://example.com/{hash}");
+    let core = serde_json::json!({
+        "name": "test", "domain": "example.com", "synopsis": "test",
+        "intent": [], "license": "MIT",
+        "tree": { "algorithm": "blob_tree_blake3_nfc" },
+        "bonds": [{"uri": uri, "relation": "depends_on", "id": "legacy"}]
+    });
+    fs::write(work_dir.join("spore.core.json"), core.to_string()).unwrap();
+    let source_index = env.dir.join("original-index.json");
+    let index = serde_json::json!({"bonds": [{
+        "hash": hash, "dir": "legacy", "cmn_url": uri,
+        "relation": "depends_on", "id": "legacy"
+    }]});
+    fs::write(&source_index, index.to_string()).unwrap();
+    let original = fs::read(&source_index).unwrap();
+    let index_path = refs_dir.join("bonds.json");
+    symlink(&source_index, &index_path).unwrap();
+    let taste_dir = env.dir.join("hypha/cache/example.com/spore").join(hash);
+    fs::create_dir_all(&taste_dir).unwrap();
+    fs::write(
+        taste_dir.join("taste.json"),
+        r#"{"verdict":"safe","tasted_at_epoch_ms":1}"#,
+    )
+    .unwrap();
+
+    // The existing directory and local taste verdict avoid network resolution.
+    for args in [vec!["bond"], vec!["bond", "--clean"]] {
+        let output = env.hypha_in_dir(&args, &work_dir);
+        assert_eq!(output.status.code(), Some(1), "{}", combined_text(&output));
+        let result = parse_json_last_line(&combined_text(&output));
+        assert_eq!(result["error"]["code"], "bond_write_failed", "{result}");
+        assert!(refs_dir.join("legacy").is_dir());
+        assert!(
+            fs::symlink_metadata(&index_path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read(&source_index).unwrap(), original);
+    }
+}
+
 #[test]
 fn test_spawn_bond_flag_help() {
     let env = TestEnv::new();

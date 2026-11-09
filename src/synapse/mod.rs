@@ -79,7 +79,7 @@ pub async fn handle_info(
                 return out.error(
                     "synapse_error",
                     &format!("Failed to parse synapse health: {}", e),
-                )
+                );
             }
         };
 
@@ -173,7 +173,7 @@ pub fn handle_use(out: &Output, domain: &str) -> ExitCode {
                 "synapse_error",
                 &format!("Synapse '{}' not found", domain),
                 Some("run: hypha synapse add <url>"),
-            )
+            );
         }
     };
 
@@ -202,7 +202,7 @@ pub fn handle_config(out: &Output, domain: &str, token_secret: Option<&str>) -> 
                 "synapse_error",
                 &format!("Synapse '{}' not found", domain),
                 Some("run: hypha synapse add <url>"),
-            )
+            );
         }
     };
 
@@ -242,9 +242,10 @@ pub async fn handle_discover(
     };
 
     let opts = match resolved.token_secret.as_deref() {
-        Some(t) => {
-            substrate::client::FetchOptions::with_bearer_token(t).max_bytes(JSON_FETCH_MAX_BYTES)
-        }
+        Some(t) => match substrate::client::FetchOptions::with_bearer_token(t) {
+            Ok(opts) => opts.max_bytes(JSON_FETCH_MAX_BYTES),
+            Err(e) => return out.error("synapse_error", &e.to_string()),
+        },
         None => substrate::client::FetchOptions::with_max_bytes(JSON_FETCH_MAX_BYTES),
     };
 

@@ -24,12 +24,12 @@
 mod commands;
 mod dir;
 mod domain;
-mod fs;
+pub(crate) mod fs;
 mod types;
 
 pub use commands::{handle_clean, handle_list, handle_path};
 pub use dir::CacheDir;
-pub use domain::{DomainCache, DOMAIN_STATE_JUMP_THRESHOLD};
+pub use domain::{DOMAIN_STATE_JUMP_THRESHOLD, DomainCache};
 pub use types::{
     CacheStatus, CachedSpore, DomainStatePin, FetchStatus, KeyTrustEntry, TasteVerdictCache,
 };

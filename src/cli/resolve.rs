@@ -1,12 +1,10 @@
 //! Resolve the closed registry into Hypha's typed command model.
 
-use std::io::Write;
 use std::str::FromStr;
 
 use agent_first_data::{
-    cli_error_event, cli_help_event, cli_parse_output, cli_version_event, render_cli_reference,
-    BoundOutcome, BuiltCliSpec, CliEmitter, CliValue, OutputFormat, OutputPlan, OutputTo,
-    ResolvedInvocation,
+    BuiltCliSpec, CliEmitter, CliValue, OutputFormat, OutputPlan, OutputTo, ResolvedInvocation,
+    cli_error_event,
 };
 
 use super::spec;
@@ -37,40 +35,22 @@ pub fn parse_or_exit() -> (
         ),
     };
 
-    match outcome {
-        BoundOutcome::Run(invocation) => {
-            let redirect = install_redirect_or_exit(invocation.output_plan());
-            match invocation.run() {
-                Ok(command) => (command, redirect),
-                Err(message) => emit_invalid_invocation_or_exit(&message),
-            }
+    let redirect = install_redirect_or_exit(outcome.output_plan());
+    let invocation = match outcome.into_run() {
+        Ok(invocation) => invocation,
+        Err(code) => {
+            let code_to_i32 = if code == std::process::ExitCode::SUCCESS {
+                0
+            } else {
+                4
+            };
+            std::process::exit(code_to_i32);
         }
-        BoundOutcome::Docs(docs) => {
-            let _redirect = install_redirect_or_exit(docs.output_plan());
-            write_text_or_exit(&render_cli_reference(&cli), OutputTo::Stdout)
-        }
-        BoundOutcome::Help(help) => {
-            let _redirect = install_redirect_or_exit(help.output_plan());
-            let format = format_of(help.output_plan());
-            if format == OutputFormat::Plain {
-                write_text_or_exit(&help.plain(), raw_destination(help.output_plan()));
-            }
-            emit_event_or_exit(
-                cli_help_event(&help),
-                format,
-                destination_of(help.output_plan()),
-                0,
-            )
-        }
-        BoundOutcome::Version(version) => {
-            let _redirect = install_redirect_or_exit(version.output_plan());
-            emit_event_or_exit(
-                cli_version_event(&version),
-                format_of(version.output_plan()),
-                destination_of(version.output_plan()),
-                0,
-            )
-        }
+    };
+
+    match invocation.run() {
+        Ok(command) => (command, redirect),
+        Err(message) => emit_invalid_invocation_or_exit(&message),
     }
 }
 
@@ -169,6 +149,7 @@ fn build_cli(invocation: &ResolvedInvocation) -> BuildResult {
                 spec: required_string(invocation, "spec")?,
                 domain: optional_string(invocation, "domain"),
                 site_path: optional_string(invocation, "site_path"),
+                sites: repeated_strings(invocation, "site"),
                 check: flag(invocation, "check"),
             },
         }),
@@ -355,20 +336,22 @@ fn build_cli(invocation: &ResolvedInvocation) -> BuildResult {
         action => {
             return Err(format!(
                 "registry action `{action}` has no typed command builder"
-            ))
+            ));
         }
     };
 
     Ok(Cli {
         output: invocation
             .output_plan()
-            .format()
-            .unwrap_or("json")
+            .output_format()
+            .unwrap_or(OutputFormat::Json)
+            .as_str()
             .to_string(),
         output_to: invocation
             .output_plan()
-            .destination()
-            .unwrap_or("split")
+            .output_to()
+            .unwrap_or(OutputTo::Split)
+            .as_str()
             .to_string(),
         log: log_filters(invocation),
         command,
@@ -558,26 +541,6 @@ fn install_redirect_or_exit(
     }
 }
 
-fn format_of(plan: &OutputPlan) -> OutputFormat {
-    plan.format()
-        .and_then(|format| cli_parse_output(format).ok())
-        .unwrap_or(OutputFormat::Json)
-}
-
-fn destination_of(plan: &OutputPlan) -> OutputTo {
-    plan.destination()
-        .and_then(|destination| OutputTo::parse(destination).ok())
-        .unwrap_or(OutputTo::Split)
-}
-
-fn raw_destination(plan: &OutputPlan) -> OutputTo {
-    if plan.destination() == Some("stderr") {
-        OutputTo::Stderr
-    } else {
-        OutputTo::Stdout
-    }
-}
-
 fn emit_invalid_invocation_or_exit(message: &str) -> ! {
     let event = match agent_first_data::json_error("cli_invalid_argument_value", message)
         .hint("run `hypha --help` and choose one registered combination")
@@ -611,20 +574,11 @@ fn emit_startup_error_or_exit(code: &str, message: &str) -> ! {
     emit_event_or_exit(event, OutputFormat::Json, OutputTo::Stderr, 1)
 }
 
-#[allow(clippy::disallowed_methods)]
-fn write_text_or_exit(text: &str, destination: OutputTo) -> ! {
-    let result = match destination {
-        OutputTo::Stderr => std::io::stderr().lock().write_all(text.as_bytes()),
-        OutputTo::Split | OutputTo::Stdout => std::io::stdout().lock().write_all(text.as_bytes()),
-    };
-    std::process::exit(if result.is_ok() { 0 } else { 4 })
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
-    use agent_first_data::CliOutcome;
+    use agent_first_data::{CliOutcome, render_cli_reference};
 
     #[test]
     fn every_registered_shape_resolves_and_builds_a_typed_command() {
@@ -695,11 +649,12 @@ mod tests {
         };
         assert_eq!(help.model().schema, "cli-help-v2");
         assert_eq!(help.model().shapes.len(), 2);
-        assert!(help
-            .model()
-            .shapes
-            .iter()
-            .any(|shape| shape.usage.contains("--dist-git")));
+        assert!(
+            help.model()
+                .shapes
+                .iter()
+                .any(|shape| shape.usage.contains("--dist-git"))
+        );
         let docs = render_cli_reference(&cli);
         assert!(docs.contains("closed `cli-spec-v1` registry"));
         assert!(docs.contains("hypha mycelium serve"));

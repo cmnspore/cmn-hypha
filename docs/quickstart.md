@@ -10,14 +10,8 @@ Get started with CMN in under 5 minutes.
 ## Install Hypha
 
 ```bash
-# Download and extract
-curl -L https://cmn.dev/download/cmn-tools -o cmn-tools.tar.zst
-mkdir cmn-tools && tar --zstd -xf cmn-tools.tar.zst -C cmn-tools
-
-# Build and install
-cd cmn-tools
-cargo build --release -p hypha
-cp target/release/hypha ~/.local/bin/
+# Install the standalone crate and its hypha binary
+cargo install cmn-hypha --locked
 ```
 
 ## Try It: Explore a Live Spore
@@ -104,10 +98,10 @@ hypha sense cmn://cmn.dev
               "synopsis": "Code Mycelial Network - A sovereign-first protocol for code distribution"
             },
             {
-              "id": "cmn-tools",
+              "id": "cmn-hypha",
               "hash": "b3.8cQnH4xPmZ2vLkJdRt7wNbA9sF3eYgU1hK6pXq5",
-              "name": "CMN Tools",
-              "synopsis": "Command-line tools for CMN protocol (hypha, synapse, substrate)"
+              "name": "Hypha",
+              "synopsis": "The reference CMN client CLI"
             }
           ]
         },

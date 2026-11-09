@@ -42,7 +42,7 @@ cd my-spore
 Used with `--dist git`:
 
 1. Verify spore signature against domain's public key
-2. Clone git repository to cache: `~/.cache/cmn/hypha/{domain}/repos/{root_commit}/`
+2. Clone git repository to cache: `~/.cmn/hypha/cache/{domain}/repos/{root_commit}/`
 3. Checkout verified ref to target directory
 4. If `--vcs git`: keep .git and set up remotes; otherwise remove .git
 5. Save source manifest to `.cmn/spawned-from/spore.json`
@@ -111,8 +111,8 @@ Grow refuses to overwrite local changes. The check depends on the workspace:
 
 When blocked, the error includes cache paths for manual merge:
 ```
-Old: ~/.cmn/cache/{domain}/spore/{old_hash}/content/
-New: ~/.cmn/cache/{domain}/spore/{new_hash}/content/
+Old: ~/.cmn/hypha/cache/{domain}/spore/{old_hash}/content/
+New: ~/.cmn/hypha/cache/{domain}/spore/{new_hash}/content/
 ```
 
 ### Archive Source Grow
@@ -157,8 +157,14 @@ my-spore/
 For `depends_on` bonds, use `bonds.json` to look up the dir name and set up build system paths pointing to `.cmn/bonds/{id-or-hash}/content/`:
 
 ```toml
-# Cargo.toml
+# Cargo.toml — keep published dependencies usable outside this working copy
 [dependencies]
+parsing_lib = "1"
+```
+
+```toml
+# .cargo/config.toml — local override for the fetched dependency
+[patch.crates-io]
 parsing_lib = { path = ".cmn/bonds/signing-lib/content" }
 ```
 
@@ -179,7 +185,10 @@ parsing_lib = { path = ".cmn/bonds/signing-lib/content" }
 
 ### Taste Gate
 
-Every bonded spore must be individually tasted as `safe` before bond places it in your working directory. No shortcuts — trusting one spore from a domain does not extend to other spores on that domain.
+Each bonded spore has its own taste gate. `safe`, `fresh`, and `sweet` proceed;
+`rotten` warns, while an untasted or `toxic` spore blocks by default. Trusting one
+spore from a domain does not extend to others. Explicit sandbox mode allows
+untasted and rotten content, while toxic content remains blocked.
 
 ```bash
 # Taste each reference first
@@ -256,7 +265,7 @@ Query the evolution network via Synapse:
 
 ```bash
 # Who did this spore come from?
-hypha ancestors cmn://... --synapse https://synapse.example.com
+hypha lineage cmn://... --direction out --synapse https://synapse.example.com
 
 # Who forked/evolved this spore?
 hypha lineage cmn://... --synapse https://synapse.example.com
@@ -268,13 +277,13 @@ After modifying a spawned spore:
 
 ```bash
 # 1. Set up your own domain (one-time)
-hypha mycelium root --domain mydomain.com
+hypha mycelium root mydomain.com
 
 # 2. Update spore.core.json
 hypha hatch --domain mydomain.com --intent "Added my feature"
 
 # 3. Replicate non-self bonds to your domain (recommended)
-hypha replicate --bonds --domain mydomain.com
+hypha replicate --refs --domain mydomain.com
 
 # 4. Release under your domain
 hypha release --domain mydomain.com
@@ -294,7 +303,7 @@ Publishers SHOULD replicate all bonds that point to other domains before releasi
 hypha replicate cmn://other.com/b3.8cQnH4xPmZ2vLkJdRt7wNbA9sF3eYgU1hK6pXq5 --domain mydomain.com
 
 # Replicate all non-self bonds and update spore.core.json URIs
-hypha replicate --bonds --domain mydomain.com
+hypha replicate --refs --domain mydomain.com
 ```
 
 A replicate is an exact copy (same hash, same `core`). The original authorship is preserved in `core.domain` — your domain only re-signs the capsule.
@@ -302,7 +311,7 @@ A replicate is an exact copy (same hash, same `core`). The original authorship i
 ## 9. Local Cache Structure
 
 ```
-~/.cache/cmn/hypha/
+~/.cmn/hypha/cache/
 └── {domain}/
     ├── mycelium/
     │   ├── cmn.json            # Domain entry point cache (includes public key)
@@ -318,6 +327,9 @@ A replicate is an exact copy (same hash, same `core`). The original authorship i
         └── {root_commit}/     # Identified by first commit SHA
             └── .git/          # Bare repository (verified)
 ```
+
+The default cache follows `CMN_HOME` (`~/.cmn` when unset); `cache.path` can
+override it. Use `hypha cache path <URI>` to find the effective content directory.
 
 **Why `root_commit` as identifier:**
 - Stable: Never changes, even with new commits

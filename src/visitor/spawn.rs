@@ -221,12 +221,10 @@ pub async fn spawn(
     };
 
     // Auto-bond after successful spawn
-    if bond {
-        if let Err(e) = bond_in_dir(&target_path, false, false, sink).await {
-            sink.emit(crate::HyphaEvent::Warn {
-                message: format!("Bond failed after spawn: {}", e),
-            });
-        }
+    if bond && let Err(e) = bond_in_dir(&target_path, false, false, sink).await {
+        sink.emit(crate::HyphaEvent::Warn {
+            message: format!("Bond failed after spawn: {}", e),
+        });
     }
 
     Ok(output)
@@ -375,12 +373,12 @@ async fn spawn_from_git_lib(
     }
 
     let spore_core_path = target_path.join("spore.core.json");
-    if spore_core_path.exists() {
-        if let Err(e) = save_spawned_from_manifest(&spore_core_path, manifest) {
-            sink.emit(crate::HyphaEvent::Warn {
-                message: format!("Failed to save spawned-from: {}", e),
-            });
-        }
+    if spore_core_path.exists()
+        && let Err(e) = save_spawned_from_manifest(&spore_core_path, manifest)
+    {
+        sink.emit(crate::HyphaEvent::Warn {
+            message: format!("Failed to save spawned-from: {}", e),
+        });
     }
 
     let abs_path = target_path
@@ -510,12 +508,12 @@ async fn spawn_from_archive_lib(
     }
 
     let spore_core_path = target_path.join("spore.core.json");
-    if spore_core_path.exists() {
-        if let Err(e) = save_spawned_from_manifest(&spore_core_path, manifest) {
-            sink.emit(crate::HyphaEvent::Warn {
-                message: format!("Failed to save spawned-from: {}", e),
-            });
-        }
+    if spore_core_path.exists()
+        && let Err(e) = save_spawned_from_manifest(&spore_core_path, manifest)
+    {
+        sink.emit(crate::HyphaEvent::Warn {
+            message: format!("Failed to save spawned-from: {}", e),
+        });
     }
 
     let abs_path = target_path
@@ -554,7 +552,7 @@ fn safe_entry_target(
                 return Err(ExtractError::Failed(format!(
                     "archive entry escapes destination: {}",
                     rel
-                )))
+                )));
             }
         }
     }
@@ -714,13 +712,13 @@ pub(super) async fn download_and_extract_tarball_cached_with_progress(
     }
 
     let max_download = cache.spore_max_download_bytes;
-    if let Some(content_length) = response.content_length() {
-        if content_length > max_download {
-            return Err(ExtractError::Malicious(format!(
-                "Remote payload too large: {} bytes exceeds limit {}",
-                content_length, max_download
-            )));
-        }
+    if let Some(content_length) = response.content_length()
+        && content_length > max_download
+    {
+        return Err(ExtractError::Malicious(format!(
+            "Remote payload too large: {} bytes exceeds limit {}",
+            content_length, max_download
+        )));
     }
 
     let mut archive_file = tempfile::NamedTempFile::new()
@@ -1048,7 +1046,7 @@ mod tests {
     async fn archive_endpoint_retry_bad_then_good_does_not_mark_toxic() {
         let _lock = crate::config::ENV_LOCK.lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("CMN_HOME", home.path());
+        crate::env::set_var("CMN_HOME", home.path());
         let cache = crate::cache::CacheDir::new().unwrap();
         let domain_cache = cache.domain("example.com");
 
@@ -1166,6 +1164,6 @@ mod tests {
             "bad unverified endpoint must not persist a toxic verdict"
         );
 
-        std::env::remove_var("CMN_HOME");
+        crate::env::remove_var("CMN_HOME");
     }
 }

@@ -6,11 +6,11 @@ use crate::api::Output;
 use crate::auth;
 use crate::site::{self, SiteDir};
 use substrate::{
-    build_mycelium_uri, build_spore_uri, CmnCapsuleEntry, CmnEntry, CmnUri, Mycelium, CMN_SCHEMA,
+    CMN_SCHEMA, CmnCapsuleEntry, CmnEntry, CmnUri, Mycelium, build_mycelium_uri, build_spore_uri,
 };
 
-use super::format::format_mycelium;
 use super::MyceliumError;
+use super::format::format_mycelium;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ResolvedSporeRef {
@@ -190,10 +190,10 @@ pub fn handle_status(
     }
 
     if let Some(domain) = domain {
-        if site_path.is_none() {
-            if let Err(e) = site::validate_site_domain_path(domain) {
-                return out.error_hypha(&e);
-            }
+        if site_path.is_none()
+            && let Err(e) = site::validate_site_domain_path(domain)
+        {
+            return out.error_hypha(&e);
         }
 
         let site = SiteDir::from_args(domain, site_path);
@@ -319,6 +319,7 @@ pub fn update_inventory(
         }
     };
 
+    mycelium.capsule.core.key = identity.public_key.clone();
     mycelium.add_spore(spore_id, spore_hash, name, synopsis, now_epoch_ms);
 
     // 1. Sign core → core_signature

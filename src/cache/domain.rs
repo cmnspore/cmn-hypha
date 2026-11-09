@@ -5,8 +5,8 @@ use substrate::CmnEntry;
 use crate::sink::HyphaError;
 
 use super::{
-    locked_update_file, locked_write_file, CacheStatus, DomainStatePin, FetchStatus, KeyTrustEntry,
-    TasteVerdictCache,
+    CacheStatus, DomainStatePin, FetchStatus, KeyTrustEntry, TasteVerdictCache, locked_update_file,
+    locked_write_file,
 };
 
 pub const DOMAIN_STATE_JUMP_THRESHOLD: u64 = 1000;

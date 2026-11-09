@@ -14,7 +14,7 @@ Use `hypha` for Code Mycelial Network (CMN) work. The CLI emits Agent-First Data
 - `hypha <command> --help` returns every legal shape of that command in one round trip; use `hypha --docs` for the whole generated registry reference.
 - `hypha sense <URI>` inspects a CMN domain or spore without downloading code.
 - `hypha search <QUERY> --synapse synapse.cmn.dev` searches for spores.
-- `hypha taste <URI>` downloads a spore for review; rerun with `--verdict safe|toxic|...` to record a verdict.
+- `hypha taste <URI>` downloads a spore for review; rerun with `--verdict sweet|fresh|safe|rotten|toxic` to record a verdict.
 - `hypha spawn <URI> [DIR] --vcs git --bond` creates a working copy and fetches referenced spores.
 - `hypha grow --synapse synapse.cmn.dev` updates a spawned working copy.
 - `hypha hatch ...` creates or updates `spore.core.json`.
@@ -25,9 +25,15 @@ Use `hypha` for Code Mycelial Network (CMN) work. The CLI emits Agent-First Data
 
 - Treat `spore.core.json` as the source of truth for identity, synopsis, intent, license, bonds, and tree hashing.
 - Review downloaded code before recording positive taste verdicts; `.git` and `.cmn` are protected receive-time control paths, not a complete sandbox, so inspect build scripts, package manager configs, editor configs, shell hooks, CI files, and language-specific runners.
-- Read `hint` on every failed AFDATA response before retrying.
+- Read `error.hint` on every failed AFDATA response before retrying.
 - Treat exit 2 as a structural CLI rejection that never ran the action; treat exit 1 as a domain failure and branch on `error.code`.
 - Use `--output json` for automation unless the user asks for YAML or plain output.
 - Keep the default `--output-to split` when stdout is captured as result data. Use `--output-to stdout` only for a consumer that reads one ordered event stream and branches on `kind`.
 - Prefer `SYNAPSE_TOKEN_SECRET` over putting a Synapse token in argv. If an existing workflow must use `--synapse-token-secret`, do not record or repeat the raw command line.
 - Use `--stdout-file` or `--stderr-file` when the consumer needs AFDATA-managed stream redirection.
+- Copy complete CMN URIs from discovery results. Spore URIs use
+  `cmn://domain/b3.<hash>`; do not invent hashes or reuse illustrative placeholders.
+
+## Reporting Problems
+
+If hypha itself is wrong — a crash, an internal error, or behavior that contradicts its docs, not a configuration or credential problem — or the person wants a missing feature, offer to open an issue at https://github.com/cmnspore/cmn-hypha/issues. Check for duplicates first. Include `hypha --version`, the command, `error.code`, and expected versus actual, with placeholder data only: never the person's data, paths, or secrets. File it with `gh issue create` only after the person approves the draft.

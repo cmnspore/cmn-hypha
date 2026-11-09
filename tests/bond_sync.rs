@@ -168,7 +168,7 @@ fn test_bond_sync_with_replace_semantics_converges_in_one_pass() {
     );
 
     // Spec only keeps key "a" (with a new value) — "b" must be dropped.
-    let spec = r#"[{"id": "a", "uri": "cmn://test.local/b3.aaa", "with": {"a": "z"}}]"#;
+    let spec = r#"[{"id": "a", "uri": "cmn://test.local/b3.aaa", "with": {"a": "z", "enabled": true, "items": [1,2]}}]"#;
     let output = sync(&env, &spore_dir, "follows", spec, &[]);
     assert!(
         output.status.success(),
@@ -181,7 +181,7 @@ fn test_bond_sync_with_replace_semantics_converges_in_one_pass() {
     assert_eq!(bonds.len(), 1);
     assert_eq!(
         bonds[0]["with"],
-        serde_json::json!({"a": "z"}),
+        serde_json::json!({"a": "z", "enabled": true, "items": [1,2]}),
         "with must be replaced wholesale, got: {}",
         bonds[0]["with"]
     );
@@ -406,6 +406,84 @@ fn test_bond_sync_check_no_drift_exits_zero() {
     assert_eq!(json["result"]["drift"], false);
 }
 
+#[test]
+fn test_bond_sync_check_detects_reorder_and_group_position() {
+    let env = TestEnv::new();
+    init_domain(&env, "test.local");
+    let a = serde_json::json!({"relation":"follows", "id":"a", "uri":"cmn://test.local/b3.aaa"});
+    let b = serde_json::json!({"relation":"follows", "id":"b", "uri":"cmn://test.local/b3.bbb"});
+    let other =
+        serde_json::json!({"relation":"depends_on", "id":"x", "uri":"cmn://test.local/b3.xxx"});
+    for (case, initial, spec) in [
+        (
+            "reorder",
+            serde_json::json!([a, b]),
+            r#"[{"id":"b","uri":"cmn://test.local/b3.bbb"},{"id":"a","uri":"cmn://test.local/b3.aaa"}]"#,
+        ),
+        (
+            "group-position",
+            serde_json::json!([a, other, b]),
+            r#"[{"id":"a","uri":"cmn://test.local/b3.aaa"},{"id":"b","uri":"cmn://test.local/b3.bbb"}]"#,
+        ),
+    ] {
+        let dir = env.dir.join(case);
+        hatch_spore(&env, &dir, "test.local", case);
+        let mut core = read_core(&dir);
+        core["bonds"] = initial.clone();
+        fs::write(
+            dir.join("spore.core.json"),
+            serde_json::to_vec(&core).unwrap(),
+        )
+        .unwrap();
+        let before = fs::read(dir.join("spore.core.json")).unwrap();
+
+        let check = sync(&env, &dir, "follows", spec, &["--check"]);
+        assert_eq!(check.status.code(), Some(7), "{}", combined_text(&check));
+        let result = parse_json_last_line(&combined_text(&check));
+        assert_eq!(result["result"]["drift"], true);
+        assert_eq!(result["result"]["reordered"], true);
+        for key in ["to_add", "to_update", "to_remove"] {
+            assert!(result["result"][key].as_array().unwrap().is_empty());
+        }
+        assert_eq!(fs::read(dir.join("spore.core.json")).unwrap(), before);
+
+        let apply = sync(&env, &dir, "follows", spec, &[]);
+        assert!(apply.status.success(), "{}", combined_text(&apply));
+        assert_eq!(
+            parse_json_last_line(&combined_text(&apply))["result"]["reordered"],
+            true
+        );
+        let applied = read_core(&dir)["bonds"].clone();
+        assert_ne!(applied, initial);
+        let check = sync(&env, &dir, "follows", spec, &["--check"]);
+        assert!(check.status.success(), "{}", combined_text(&check));
+        let result = parse_json_last_line(&combined_text(&check));
+        assert_eq!(result["result"]["drift"], false);
+        assert_eq!(result["result"]["reordered"], false);
+        assert!(sync(&env, &dir, "follows", spec, &[]).status.success());
+        assert_eq!(read_core(&dir)["bonds"], applied);
+    }
+}
+
+#[test]
+fn test_bond_sync_cross_relation_conflict_is_error_in_check_and_apply() {
+    let env = TestEnv::new();
+    init_domain(&env, "test.local");
+    let dir = env.dir.join("relation-conflict");
+    hatch_spore(&env, &dir, "test.local", "relation-conflict");
+    let spec = r#"[{"id":"a","uri":"cmn://test.local/b3.aaa"}]"#;
+    assert!(sync(&env, &dir, "depends_on", spec, &[]).status.success());
+    let before = fs::read(dir.join("spore.core.json")).unwrap();
+
+    for extra in [&[][..], &["--check"][..]] {
+        let output = sync(&env, &dir, "follows", spec, extra);
+        assert_eq!(output.status.code(), Some(1), "{}", combined_text(&output));
+        let result = parse_json_last_line(&combined_text(&output));
+        assert_eq!(result["error"]["code"], "bond_relation_conflict");
+        assert_eq!(fs::read(dir.join("spore.core.json")).unwrap(), before);
+    }
+}
+
 // ── URI resolution: deployed inventory + release --dry-run fallback ─────
 
 #[test]
@@ -414,7 +492,7 @@ fn test_bond_sync_resolves_uri_via_dry_run_then_deployed_inventory() {
     init_domain(&env, "test.local");
 
     // Sibling spore sources live side-by-side under a common parent, matching
-    // the monorepo convention (`spores/<id>/`) the resolution fallback assumes.
+    // the sibling-directory layout the resolution fallback assumes.
     let workspace = env.dir.join("workspace");
     let sibling_dir = workspace.join("sibling-a");
     let main_dir = workspace.join("main-spore");
@@ -475,6 +553,87 @@ fn test_bond_sync_resolves_uri_via_dry_run_then_deployed_inventory() {
     let unchanged = json2["result"]["unchanged"].as_array().unwrap();
     assert_eq!(unchanged.len(), 1);
     assert_eq!(unchanged[0]["uri"].as_str().unwrap(), dry_run_uri);
+}
+
+#[test]
+fn test_bond_sync_resolves_entry_domain_from_its_own_site() {
+    let env = TestEnv::new();
+    init_domain(&env, "test.local");
+    init_domain(&env, "other.local");
+
+    // Release the dependency to another domain, then move that site into a
+    // separate checkout, as a spore published from another repository is.
+    let dep_dir = env.dir.join("other-repo/spores/external-dep");
+    hatch_spore(&env, &dep_dir, "other.local", "external-dep");
+    let release = env.hypha_in_dir(&["release", "--domain", "other.local"], &dep_dir);
+    assert!(release.status.success(), "{}", combined_text(&release));
+    let other_site = env.dir.join("other-repo/deploy/other.local");
+    fs::create_dir_all(other_site.parent().unwrap()).unwrap();
+    fs::rename(env.site_dir("other.local"), &other_site).unwrap();
+    let other_site_arg = other_site.to_str().unwrap();
+
+    let main_dir = env.dir.join("workspace/main-spore");
+    hatch_spore(&env, &main_dir, "test.local", "main-spore");
+    let spec = r#"[{"id": "external-dep", "domain": "other.local"}]"#;
+    let site_arg = format!("other.local={}", other_site_arg);
+
+    // Without --site the default other.local site is empty: unresolved.
+    let missing = sync(
+        &env,
+        &main_dir,
+        "depends_on",
+        spec,
+        &["--domain", "test.local"],
+    );
+    assert!(!missing.status.success());
+    assert!(combined_text(&missing).contains("bond_uri_unresolved"));
+
+    let output = sync(
+        &env,
+        &main_dir,
+        "depends_on",
+        spec,
+        &["--domain", "test.local", "--site", &site_arg],
+    );
+    assert!(output.status.success(), "{}", combined_text(&output));
+    let json = parse_json_last_line(&combined_text(&output));
+    let applied = json["result"]["applied"].as_array().unwrap();
+    assert_eq!(applied.len(), 1);
+    assert!(
+        applied[0]["uri"]
+            .as_str()
+            .unwrap()
+            .starts_with("cmn://other.local/b3."),
+        "unexpected resolved uri: {}",
+        applied[0]["uri"]
+    );
+}
+
+#[test]
+fn test_bond_sync_rejects_invalid_site_values() {
+    let env = TestEnv::new();
+    init_domain(&env, "test.local");
+    let spore_dir = env.dir.join("spore-bad-site");
+    hatch_spore(&env, &spore_dir, "test.local", "spore-bad-site");
+
+    for args in [
+        vec!["--site", "no-equals-sign"],
+        vec!["--site", "a.local=x", "--site", "a.local=y"],
+        vec![
+            "--domain",
+            "a.local",
+            "--site-path",
+            "x",
+            "--site",
+            "a.local=y",
+        ],
+        vec!["--site-path", "x"],
+    ] {
+        let output = sync(&env, &spore_dir, "follows", "[]", &args);
+        assert!(!output.status.success(), "{:?} should fail", args);
+        let text = combined_text(&output);
+        assert!(text.contains("bond_site_invalid"), "{:?}: {}", args, text);
+    }
 }
 
 #[test]

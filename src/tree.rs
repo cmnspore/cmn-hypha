@@ -7,8 +7,8 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::Match;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use substrate::{DirReader, TreeEntry};
 
 /// Real filesystem reader with hierarchical gitignore-style follow_rules support.
@@ -129,10 +129,8 @@ fn discover_follow_rules(
             found = true;
         }
     }
-    if found {
-        if let Ok(gi) = builder.build() {
-            acc.push(gi);
-        }
+    if found && let Ok(gi) = builder.build() {
+        acc.push(gi);
     }
 
     let read = match fs::read_dir(dir) {
@@ -204,11 +202,11 @@ fn check_no_symlinks_inner(
         if substrate::tree::should_exclude(&name, exclude_names) {
             continue;
         }
-        if reader.is_ignored(&path, false) {
+        let file_type = entry.file_type()?;
+        if reader.is_ignored(&path, file_type.is_dir()) {
             continue;
         }
 
-        let file_type = fs::symlink_metadata(&path)?.file_type();
         if file_type.is_symlink() {
             let target = fs::read_link(&path)
                 .map(|t| t.to_string_lossy().into_owned())
@@ -219,7 +217,9 @@ fn check_no_symlinks_inner(
                  Symlinks are not included in spore content.\n  \
                  To include the target content: cp -L \"{0}\" \"{0}.tmp\" && mv \"{0}.tmp\" \"{0}\"\n  \
                  To exclude it: add \"{}\" to exclude_names",
-                relative.display(), target, name,
+                relative.display(),
+                target,
+                name,
             );
         }
         if file_type.is_dir() {

@@ -26,7 +26,7 @@ pub(super) fn spawned_from_hash(manifest: &serde_json::Value) -> Option<String> 
 pub async fn grow(
     path: Option<&str>,
     dist_preference: Option<&str>,
-    bond: bool,
+    _bond: bool,
     synapse_arg: Option<&str>,
     synapse_token_secret: Option<&str>,
     sink: &dyn crate::EventSink,
@@ -314,14 +314,6 @@ pub async fn grow(
         total: 6,
         message: "Complete".to_string(),
     });
-
-    if bond {
-        if let Err(e) = bond_in_dir(&abs_path, false, false, sink).await {
-            sink.emit(crate::HyphaEvent::Warn {
-                message: format!("Bond failed after grow: {}", e),
-            });
-        }
-    }
 
     Ok(crate::output::GrowOutput::Updated {
         cmn_url: new_uri_str,

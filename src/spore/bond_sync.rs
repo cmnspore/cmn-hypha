@@ -16,9 +16,9 @@ use serde_json::json;
 
 use substrate::{BondRelation, SporeBond};
 
+use crate::HyphaError;
 use crate::api::Output;
 use crate::site::SiteDir;
-use crate::HyphaError;
 
 use super::{load_draft, save_draft};
 
@@ -37,6 +37,9 @@ pub const BOND_SYNC_DRIFT_EXIT_CODE: u8 = 7;
 #[derive(Debug, Deserialize)]
 struct BondSyncSpecEntry {
     id: String,
+    /// Domain to resolve an omitted `uri` against; defaults to `--domain`.
+    #[serde(default)]
+    domain: Option<String>,
     #[serde(default)]
     reason: Option<String>,
     #[serde(default)]
@@ -75,14 +78,9 @@ struct ReconcileResult {
 /// Reconcile `existing` bonds so that `target_relation`'s bonds exactly equal
 /// `desired` (in spec order), leaving every other relation untouched.
 ///
-/// Matching (which existing bond, if any, a spec entry corresponds to) reuses
-/// `hatch bond set`'s own rule: match by `uri` first (across *all* existing
-/// bonds, any relation — same as `set`'s upsert-by-uri), else by
-/// `(target_relation, id)`. A cross-relation URI match is a deliberate edge
-/// case inherited from `set`'s semantics: if a spec entry's URI happens to
-/// already exist as a bond of a *different* relation, that bond is "claimed"
-/// into the target relation group rather than left in place — sync treats URI
-/// as the bond's true identity, same as `set` does.
+/// Match by URI, then by id, within the target relation only. A desired URI
+/// already owned by another relation is a conflict, so sync cannot silently
+/// change a relation outside its declared scope.
 ///
 /// Array placement: the reconciled target-relation group is spliced in
 /// *contiguously* at the position of the first pre-existing bond of
@@ -95,15 +93,29 @@ fn reconcile_bonds(
     existing: &[SporeBond],
     target_relation: &BondRelation,
     desired: Vec<SporeBond>,
-) -> ReconcileResult {
+) -> Result<ReconcileResult, HyphaError> {
     let mut consumed = vec![false; existing.len()];
     let mut match_idx = Vec::with_capacity(desired.len());
 
     for bond in &desired {
+        if let Some(conflict) = existing
+            .iter()
+            .find(|existing| &existing.relation != target_relation && existing.uri == bond.uri)
+        {
+            return Err(HyphaError::with_hint(
+                "bond_relation_conflict",
+                format!(
+                    "URI {} already belongs to relation {}",
+                    bond.uri,
+                    conflict.relation.as_str()
+                ),
+                "Use a different URI or explicitly remove the existing bond before syncing",
+            ));
+        }
         let idx = existing
             .iter()
             .enumerate()
-            .find(|(i, b)| !consumed[*i] && b.uri == bond.uri)
+            .find(|(i, b)| !consumed[*i] && &b.relation == target_relation && b.uri == bond.uri)
             .map(|(i, _)| i)
             .or_else(|| {
                 existing
@@ -163,11 +175,11 @@ fn reconcile_bonds(
         new_bonds.extend(desired.iter().cloned());
     }
 
-    ReconcileResult {
+    Ok(ReconcileResult {
         new_bonds,
         per_entry,
         to_remove,
-    }
+    })
 }
 
 /// Read `--spec` from a file path, or stdin when the value is `"-"`.
@@ -191,19 +203,85 @@ fn read_spec_source(spec: &str) -> Result<String, HyphaError> {
     }
 }
 
+/// Where to look up each domain's mycelium inventory: `--site DOMAIN=PATH`
+/// entries, plus `--site-path` for the `--domain` default.
+struct SiteMap {
+    default_domain: Option<String>,
+    paths: Vec<(String, String)>,
+}
+
+impl SiteMap {
+    fn parse(
+        default_domain: Option<String>,
+        site_path: Option<String>,
+        sites: &[String],
+    ) -> Result<Self, HyphaError> {
+        let mut paths: Vec<(String, String)> = Vec::with_capacity(sites.len() + 1);
+        for raw in sites {
+            let Some((domain, path)) = raw
+                .split_once('=')
+                .map(|(d, p)| (d.trim(), p.trim()))
+                .filter(|(d, p)| !d.is_empty() && !p.is_empty())
+            else {
+                return Err(HyphaError::with_hint(
+                    "bond_site_invalid",
+                    format!("Invalid --site value '{}'", raw),
+                    "use --site DOMAIN=PATH, for example --site example.com=deploy/example.com",
+                ));
+            };
+            if paths.iter().any(|(d, _)| d == domain) {
+                return Err(HyphaError::with_hint(
+                    "bond_site_invalid",
+                    format!("--site gives more than one path for domain {}", domain),
+                    "pass one --site per domain",
+                ));
+            }
+            paths.push((domain.to_string(), path.to_string()));
+        }
+        if let Some(path) = site_path {
+            let Some(domain) = default_domain.as_deref() else {
+                return Err(HyphaError::with_hint(
+                    "bond_site_invalid",
+                    "--site-path needs --domain to name the site it belongs to",
+                    "pass --domain, or use --site DOMAIN=PATH",
+                ));
+            };
+            if paths.iter().any(|(d, _)| d == domain) {
+                return Err(HyphaError::with_hint(
+                    "bond_site_invalid",
+                    format!("--site-path and --site both set the site for {}", domain),
+                    "keep only one of them",
+                ));
+            }
+            paths.push((domain.to_string(), path));
+        }
+        Ok(Self {
+            default_domain,
+            paths,
+        })
+    }
+
+    fn path_for(&self, domain: &str) -> Option<&str> {
+        self.paths
+            .iter()
+            .find(|(d, _)| d == domain)
+            .map(|(_, p)| p.as_str())
+    }
+}
+
 /// Resolve an entry's URI when the spec omits one.
 ///
 /// Resolution order (matches the `update-follows.sh` consumer script this
 /// command absorbs, `get_uri()`: deployed-first, dry-run fallback):
-///   1. Deployed inventory — look up `id` in `--domain`'s local mycelium
-///      inventory (what `mycelium status --domain <D> --id <id>` reads).
+///   1. Deployed inventory — look up `id` in the entry's domain (its own
+///      `domain`, else `--domain`) local mycelium inventory (what
+///      `mycelium status --domain <D> --id <id>` reads), at that domain's
+///      `--site` path when one is given.
 ///   2. Not-yet-deployed fallback — compute the URI the sibling spore would
 ///      get if released right now, via the exact same computation
 ///      `release --dry-run` uses (see [`super::release::build_release_plan`]),
 ///      run against `<parent of cwd>/<id>` as the sibling's source directory.
-///      This assumes the monorepo convention of sibling spore sources living
-///      next to each other (`spores/<id>/` — the same convention this very
-///      repo and hypha's own `spawn` default directory follow).
+///      This assumes sibling spore source directories live next to each other.
 ///
 /// NOTE: both paths read *live* state (the deployed inventory, and the
 /// sibling's *current* working tree for the dry-run hash) — resolution is
@@ -211,27 +289,30 @@ fn read_spec_source(spec: &str) -> Result<String, HyphaError> {
 /// siblings before `sync`, not interleaved with it.
 fn resolve_bond_uri(
     entry_id: &str,
-    domain: Option<&str>,
-    site_path: Option<&str>,
+    entry_domain: Option<&str>,
+    sites: &SiteMap,
 ) -> Result<String, HyphaError> {
-    let domain = domain.ok_or_else(|| {
-        HyphaError::with_hint(
-            "missing_domain",
-            format!(
-                "Spec entry '{}' has no \"uri\" and --domain was not given for resolution",
-                entry_id
-            ),
-            "pass --domain (and --site-path for a non-default site) so sync can resolve URIs, or give an explicit \"uri\" for this entry",
-        )
-    })?;
+    let domain = entry_domain
+        .or(sites.default_domain.as_deref())
+        .ok_or_else(|| {
+            HyphaError::with_hint(
+                "missing_domain",
+                format!(
+                    "Spec entry '{}' has no \"uri\" or \"domain\" and --domain was not given for resolution",
+                    entry_id
+                ),
+                "pass --domain (and --site-path or --site for a non-default site) so sync can resolve URIs, or give this entry a \"domain\" or explicit \"uri\"",
+            )
+        })?;
+    let site_path = sites.path_for(domain);
 
     let site = SiteDir::from_args(domain, site_path);
 
     // 1. Deployed inventory (mycelium) — fast path for already-released siblings.
-    if site.exists() {
-        if let Some(hash) = crate::mycelium::find_local_spore_hash(&site, domain, entry_id) {
-            return Ok(substrate::build_spore_uri(domain, &hash));
-        }
+    if site.exists()
+        && let Some(hash) = crate::mycelium::find_local_spore_hash(&site, domain, entry_id)
+    {
+        return Ok(substrate::build_spore_uri(domain, &hash));
     }
 
     // 2. `release --dry-run` fallback for not-yet-deployed siblings.
@@ -277,8 +358,14 @@ pub fn handle_bond_sync(
     spec: &str,
     domain: Option<String>,
     site_path: Option<String>,
+    sites: &[String],
     check: bool,
 ) -> ExitCode {
+    let sites = match SiteMap::parse(domain, site_path, sites) {
+        Ok(s) => s,
+        Err(e) => return out.error_hypha(&e),
+    };
+
     let spec_content = match read_spec_source(spec) {
         Ok(c) => c,
         Err(e) => return out.error_hypha(&e),
@@ -290,7 +377,7 @@ pub fn handle_bond_sync(
             return out.error_hint(
                 "bond_spec_invalid",
                 &format!("Invalid --spec JSON: {}", e),
-                Some("--spec must be a JSON array of {id, reason?, with?, uri?} objects, or \"-\" to read stdin"),
+                Some("--spec must be a JSON array of {id, domain?, reason?, with?, uri?} objects, or \"-\" to read stdin"),
             )
         }
     };
@@ -302,13 +389,19 @@ pub fn handle_bond_sync(
                 "Each spec entry must have a non-empty \"id\"",
             );
         }
+        if entry.domain.as_deref().is_some_and(|d| d.trim().is_empty()) {
+            return out.error(
+                "bond_spec_invalid",
+                &format!("Spec entry '{}' has an empty \"domain\"", entry.id),
+            );
+        }
     }
 
     let mut desired = Vec::with_capacity(entries.len());
     for entry in &entries {
         let uri = match entry.uri.as_deref() {
             Some(u) if !u.is_empty() => u.to_string(),
-            _ => match resolve_bond_uri(&entry.id, domain.as_deref(), site_path.as_deref()) {
+            _ => match resolve_bond_uri(&entry.id, entry.domain.as_deref(), &sites) {
                 Ok(u) => u,
                 Err(e) => return out.error_hypha(&e),
             },
@@ -331,7 +424,10 @@ pub fn handle_bond_sync(
         new_bonds,
         per_entry,
         to_remove,
-    } = reconcile_bonds(&draft.bonds, &relation, desired);
+    } = match reconcile_bonds(&draft.bonds, &relation, desired) {
+        Ok(result) => result,
+        Err(error) => return out.error_hypha(&error),
+    };
 
     let to_add: Vec<&SporeBond> = per_entry
         .iter()
@@ -349,11 +445,13 @@ pub fn handle_bond_sync(
         .map(EntryDiff::bond)
         .collect();
 
+    let drift = new_bonds != draft.bonds;
+    let reordered = drift && to_add.is_empty() && to_update.is_empty() && to_remove.is_empty();
     if check {
-        let drift = !to_add.is_empty() || !to_update.is_empty() || !to_remove.is_empty();
         let result = json!({
             "relation": relation.as_str(),
             "drift": drift,
+            "reordered": reordered,
             "to_add": to_add,
             "to_update": to_update,
             "to_remove": to_remove,
@@ -374,6 +472,7 @@ pub fn handle_bond_sync(
         .collect();
     let result = json!({
         "relation": relation.as_str(),
+        "reordered": reordered,
         "applied": applied,
         "removed": to_remove,
         "unchanged": unchanged,
@@ -408,7 +507,7 @@ mod tests {
             bond(BondRelation::Follows, "cmn://d/b3.a", "a"),
             bond(BondRelation::DependsOn, "cmn://d/b3.b", "b"),
         ];
-        let result = reconcile_bonds(&existing, &BondRelation::Follows, vec![]);
+        let result = reconcile_bonds(&existing, &BondRelation::Follows, vec![]).unwrap();
         assert_eq!(result.new_bonds, vec![existing[1].clone()]);
         assert_eq!(result.to_remove, vec![existing[0].clone()]);
         assert!(result.per_entry.is_empty());
@@ -418,13 +517,13 @@ mod tests {
     fn reconcile_is_idempotent_on_second_pass() {
         let existing = vec![bond(BondRelation::DependsOn, "cmn://d/b3.other", "other")];
         let desired = vec![bond(BondRelation::Follows, "cmn://d/b3.a", "a")];
-        let first = reconcile_bonds(&existing, &BondRelation::Follows, desired.clone());
+        let first = reconcile_bonds(&existing, &BondRelation::Follows, desired.clone()).unwrap();
         assert_eq!(first.to_remove.len(), 0);
         assert_eq!(first.per_entry.len(), 1);
         assert!(matches!(first.per_entry[0], EntryDiff::Add(_)));
 
         // Second pass against the bonds produced by the first pass: zero changes.
-        let second = reconcile_bonds(&first.new_bonds, &BondRelation::Follows, desired);
+        let second = reconcile_bonds(&first.new_bonds, &BondRelation::Follows, desired).unwrap();
         assert_eq!(second.to_remove.len(), 0);
         assert!(matches!(second.per_entry[0], EntryDiff::Unchanged(_)));
         assert_eq!(second.new_bonds, first.new_bonds);
@@ -438,7 +537,7 @@ mod tests {
             bond(BondRelation::DependsOn, "cmn://d/b3.y", "y"),
         ];
         let desired = vec![bond(BondRelation::Follows, "cmn://d/b3.new", "new")];
-        let result = reconcile_bonds(&existing, &BondRelation::Follows, desired);
+        let result = reconcile_bonds(&existing, &BondRelation::Follows, desired).unwrap();
         let uris: Vec<&str> = result.new_bonds.iter().map(|b| b.uri.as_str()).collect();
         assert_eq!(uris, vec!["cmn://d/b3.x", "cmn://d/b3.new", "cmn://d/b3.y"]);
     }
@@ -447,7 +546,7 @@ mod tests {
     fn reconcile_appends_group_when_no_pre_existing_target_bonds() {
         let existing = vec![bond(BondRelation::DependsOn, "cmn://d/b3.x", "x")];
         let desired = vec![bond(BondRelation::Follows, "cmn://d/b3.new", "new")];
-        let result = reconcile_bonds(&existing, &BondRelation::Follows, desired);
+        let result = reconcile_bonds(&existing, &BondRelation::Follows, desired).unwrap();
         let uris: Vec<&str> = result.new_bonds.iter().map(|b| b.uri.as_str()).collect();
         assert_eq!(uris, vec!["cmn://d/b3.x", "cmn://d/b3.new"]);
     }

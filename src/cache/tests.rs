@@ -142,9 +142,9 @@ fn test_cache_dir_from_config_file() {
     std::fs::create_dir_all(&hypha_dir).unwrap();
     std::fs::write(hypha_dir.join("config.toml"), "[cache]\ncmn_ttl_s = 30\n").unwrap();
 
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
     let cache = CacheDir::new().unwrap();
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 
     assert_eq!(cache.cmn_ttl_ms, 30 * 1000);
 }
@@ -162,9 +162,9 @@ fn test_cache_dir_from_config_custom_path() {
     )
     .unwrap();
 
-    std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+    crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
     let cache = CacheDir::new().unwrap();
-    std::env::remove_var("CMN_HOME");
+    crate::env::remove_var("CMN_HOME");
 
     assert_eq!(cache.root, custom_cache);
 }

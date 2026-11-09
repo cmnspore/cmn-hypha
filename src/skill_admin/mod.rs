@@ -1,8 +1,8 @@
 use std::process::ExitCode;
 
 use agent_first_data::skill::{
-    run_skill_admin, SkillAction as AfSkillAction, SkillAgentSelection, SkillOptions, SkillScope,
-    SkillSpec,
+    SkillAction as AfSkillAction, SkillAgentSelection, SkillOptions, SkillScope, SkillSpec,
+    run_skill_admin,
 };
 
 use crate::api::Output;

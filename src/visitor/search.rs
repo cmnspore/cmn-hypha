@@ -59,7 +59,7 @@ pub async fn search_with_bond(
         license,
         bond_filter,
         limit,
-        fetch_opts(resolved.token_secret.as_deref()),
+        fetch_opts(resolved.token_secret.as_deref())?,
     )
     .await
     .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;

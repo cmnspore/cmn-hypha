@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use crate::api::Output;
 
-use super::{config_path, HyphaConfig, KeyTrustRefreshMode, SynapseWitnessMode};
+use super::{HyphaConfig, KeyTrustRefreshMode, SynapseWitnessMode, config_path};
 
 const VALID_KEYS: &str = "cache.path, cache.cmn_ttl_s, cache.key_trust_ttl_s, cache.key_trust_refresh_mode, cache.key_trust_synapse_witness_mode, cache.spore_max_download_bytes, cache.spore_max_extract_bytes, cache.spore_max_extract_files, cache.spore_max_extract_file_bytes, cache.spore_reject_path_components, cache.clock_skew_tolerance_s, cache.require_domain_first_key, defaults.synapse_domain, defaults.domain, defaults.taste.synapse_domain, defaults.taste.domain";
 
@@ -19,7 +19,7 @@ pub fn handle_list(out: &Output) -> ExitCode {
             return out.error(
                 "serialize_error",
                 &format!("Failed to serialize Hypha configuration: {err}"),
-            )
+            );
         }
     };
 
@@ -74,7 +74,7 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
                 return out.error(
                     "invalid_value",
                     &format!("Expected one of: expired, always, offline for {}", key),
-                )
+                );
             }
         },
         "cache.key_trust_synapse_witness_mode" => match value {
@@ -86,7 +86,7 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
                 return out.error(
                     "invalid_value",
                     &format!("Expected one of: allow, require_domain for {}", key),
-                )
+                );
             }
         },
         "cache.spore_max_download_bytes" => set_u64!(cfg.cache.spore_max_download_bytes),
@@ -94,18 +94,17 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
         "cache.spore_max_extract_files" => set_u64!(cfg.cache.spore_max_extract_files),
         "cache.spore_max_extract_file_bytes" => set_u64!(cfg.cache.spore_max_extract_file_bytes),
         "cache.spore_reject_path_components" => {
-            cfg.cache.spore_reject_path_components = match parse_string_list(value) {
-                Ok(v) => v,
-                Err(e) => {
-                    return out.error(
+            cfg.cache.spore_reject_path_components =
+                match parse_string_list(value) {
+                    Ok(v) => v,
+                    Err(e) => return out.error(
                         "invalid_value",
                         &format!(
                             "Expected TOML string array for {} (example: [\".git\", \".cmn\"]): {}",
                             key, e
                         ),
-                    )
+                    ),
                 }
-            }
         }
         "cache.clock_skew_tolerance_s" => set_u64!(cfg.cache.clock_skew_tolerance_s),
         "cache.require_domain_first_key" => match value {
@@ -115,7 +114,7 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
                 return out.error(
                     "invalid_value",
                     &format!("Expected one of: true, false for {}", key),
-                )
+                );
             }
         },
         "defaults.synapse_domain" => cfg.defaults.synapse_domain = Some(value.to_string()),
@@ -128,7 +127,7 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
             return out.error(
                 "unknown_key",
                 &format!("Unknown config key '{}'. Valid keys: {}", key, VALID_KEYS),
-            )
+            );
         }
     }
 
@@ -138,7 +137,7 @@ pub fn handle_set(out: &Output, key: &str, value: &str) -> ExitCode {
             return out.error(
                 "serialize_error",
                 &format!("Failed to serialize updated configuration: {error}"),
-            )
+            );
         }
     };
     let pointer = format!("/{}", key.replace('.', "/"));

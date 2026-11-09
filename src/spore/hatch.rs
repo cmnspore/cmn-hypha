@@ -39,7 +39,7 @@ pub fn handle_hatch(out: &Output, args: HatchArgs) -> ExitCode {
                 return out.error(
                     "identity_error",
                     &format!("Cannot resolve key for domain '{}': {}", d, e),
-                )
+                );
             }
         }
         draft.domain = d;

@@ -6,7 +6,7 @@ use crate::auth;
 use crate::site::{self, SiteDir};
 use substrate::{Mycelium, PrettyJson};
 
-use super::{load_existing_mycelium, sign_and_save_mycelium, with_warning, InitArgs};
+use super::{InitArgs, load_existing_mycelium, sign_and_save_mycelium, with_warning};
 
 pub fn handle_init(out: &Output, args: InitArgs<'_>) -> ExitCode {
     let now_epoch_ms = crate::time::now_epoch_ms();
@@ -31,10 +31,10 @@ pub fn handle_init(out: &Output, args: InitArgs<'_>) -> ExitCode {
         None => return out.error("missing_domain", "Domain is required (or use --hub)"),
     };
 
-    if site_path.is_none() {
-        if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error_hypha(&e);
-        }
+    if site_path.is_none()
+        && let Err(e) = site::validate_site_domain_path(domain)
+    {
+        return out.error_hypha(&e);
     }
 
     let site = SiteDir::from_args(domain, site_path);
@@ -42,13 +42,13 @@ pub fn handle_init(out: &Output, args: InitArgs<'_>) -> ExitCode {
     match auth::init_identity_with_site(domain, &site) {
         Ok(info) => {
             let cmn_path = site.cmn_json_path();
-            if let Some(parent) = cmn_path.parent() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    return out.error(
-                        "write_error",
-                        &format!("Failed to create .well-known dir: {}", e),
-                    );
-                }
+            if let Some(parent) = cmn_path.parent()
+                && let Err(e) = std::fs::create_dir_all(parent)
+            {
+                return out.error(
+                    "write_error",
+                    &format!("Failed to create .well-known dir: {}", e),
+                );
             }
 
             if let Some(base) = endpoints_base {
@@ -100,7 +100,7 @@ pub fn handle_init(out: &Output, args: InitArgs<'_>) -> ExitCode {
                         return out.error(
                             "serialize_error",
                             &format!("Failed to format cmn.json: {}", e),
-                        )
+                        );
                     }
                 };
                 if let Err(e) = std::fs::write(&cmn_path, &manifest_json) {
@@ -169,11 +169,11 @@ fn handle_init_hub(
     // Step 3: Move key files to the real site directory
     let real_site = SiteDir::from_args(&domain, site_path);
     if real_site.root != temp_site.root {
-        if let Some(parent) = real_site.root.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                let _ = std::fs::remove_dir_all(&temp_site.root);
-                return out.error("write_error", &format!("Failed to create site dir: {}", e));
-            }
+        if let Some(parent) = real_site.root.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            let _ = std::fs::remove_dir_all(&temp_site.root);
+            return out.error("write_error", &format!("Failed to create site dir: {}", e));
         }
         if let Err(e) = std::fs::rename(&temp_site.root, &real_site.root) {
             let _ = std::fs::remove_dir_all(&temp_site.root);
@@ -192,13 +192,13 @@ fn handle_init_hub(
     };
 
     let cmn_path = real_site.cmn_json_path();
-    if let Some(parent) = cmn_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            return out.error(
-                "write_error",
-                &format!("Failed to create .well-known dir: {}", e),
-            );
-        }
+    if let Some(parent) = cmn_path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        return out.error(
+            "write_error",
+            &format!("Failed to create .well-known dir: {}", e),
+        );
     }
 
     // Build and sign cmn.json entry
@@ -213,10 +213,10 @@ fn handle_init_hub(
     let entry_signature = match crate::auth::sign_json_with_site(&real_site, &capsules) {
         Ok(s) => s,
         Err(crate::auth::JsonSignError::Jcs(message)) => {
-            return out.error("serialize_error", &message)
+            return out.error("serialize_error", &message);
         }
         Err(crate::auth::JsonSignError::Sign(err)) => {
-            return out.error("sign_error", &format!("Failed to sign cmn.json: {}", err))
+            return out.error("sign_error", &format!("Failed to sign cmn.json: {}", err));
         }
     };
 
@@ -232,7 +232,7 @@ fn handle_init_hub(
             return out.error(
                 "serialize_error",
                 &format!("Failed to format cmn.json: {}", e),
-            )
+            );
         }
     };
 

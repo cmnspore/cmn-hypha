@@ -158,13 +158,13 @@ pub async fn download_file(
         return Err(ExtractError::Failed(format!("HTTP {}", response.status())));
     }
 
-    if let Some(content_length) = response.content_length() {
-        if content_length > spore_max_download_bytes {
-            return Err(ExtractError::Malicious(format!(
-                "Remote payload too large: {} bytes exceeds limit {}",
-                content_length, spore_max_download_bytes
-            )));
-        }
+    if let Some(content_length) = response.content_length()
+        && content_length > spore_max_download_bytes
+    {
+        return Err(ExtractError::Malicious(format!(
+            "Remote payload too large: {} bytes exceeds limit {}",
+            content_length, spore_max_download_bytes
+        )));
     }
 
     let parent = dest.parent().ok_or_else(|| {

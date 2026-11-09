@@ -15,10 +15,10 @@ pub fn handle_nutrient_add(
 ) -> ExitCode {
     let now_epoch_ms = crate::time::now_epoch_ms();
 
-    if site_path.is_none() {
-        if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error_hypha(&e);
-        }
+    if site_path.is_none()
+        && let Err(e) = site::validate_site_domain_path(domain)
+    {
+        return out.error_hypha(&e);
     }
     let site = SiteDir::from_args(domain, site_path);
 
@@ -29,7 +29,7 @@ pub fn handle_nutrient_add(
                 "no_mycelium",
                 "No mycelium found",
                 Some("run: hypha mycelium root --endpoints-base URL"),
-            )
+            );
         }
     };
 
@@ -99,10 +99,10 @@ pub fn handle_nutrient_remove(
 ) -> ExitCode {
     let now_epoch_ms = crate::time::now_epoch_ms();
 
-    if site_path.is_none() {
-        if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error_hypha(&e);
-        }
+    if site_path.is_none()
+        && let Err(e) = site::validate_site_domain_path(domain)
+    {
+        return out.error_hypha(&e);
     }
     let site = SiteDir::from_args(domain, site_path);
 
@@ -113,7 +113,7 @@ pub fn handle_nutrient_remove(
                 "no_mycelium",
                 "No mycelium found",
                 Some("run: hypha mycelium root --endpoints-base URL"),
-            )
+            );
         }
     };
 
@@ -136,10 +136,10 @@ pub fn handle_nutrient_remove(
 pub fn handle_nutrient_clear(out: &Output, domain: &str, site_path: Option<&str>) -> ExitCode {
     let now_epoch_ms = crate::time::now_epoch_ms();
 
-    if site_path.is_none() {
-        if let Err(e) = site::validate_site_domain_path(domain) {
-            return out.error_hypha(&e);
-        }
+    if site_path.is_none()
+        && let Err(e) = site::validate_site_domain_path(domain)
+    {
+        return out.error_hypha(&e);
     }
     let site = SiteDir::from_args(domain, site_path);
 
@@ -150,7 +150,7 @@ pub fn handle_nutrient_clear(out: &Output, domain: &str, site_path: Option<&str>
                 "no_mycelium",
                 "No mycelium found",
                 Some("run: hypha mycelium root --endpoints-base URL"),
-            )
+            );
         }
     };
 

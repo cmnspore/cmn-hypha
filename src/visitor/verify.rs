@@ -119,7 +119,7 @@ pub(crate) async fn fetch_verified_spore(
                     &client,
                     &synapse_url,
                     hash,
-                    fetch_opts(synapse_token_secret.as_deref()),
+                    fetch_opts(synapse_token_secret.as_deref())?,
                 )
                 .await
                 .map_err(|e| {
@@ -174,7 +174,7 @@ mod tests {
     /// Set up a temp CMN_HOME and return (dir, DomainCache) for the given domain.
     fn setup_domain_cache(domain: &str) -> (tempfile::TempDir, crate::cache::DomainCache) {
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
+        crate::env::set_var("CMN_HOME", dir.path().to_str().unwrap());
         let cache = crate::cache::CacheDir::new().unwrap();
         let dc = cache.domain(domain);
         (dir, dc)
@@ -193,7 +193,7 @@ mod tests {
         assert!(cfg.require_domain_first_key);
         assert!(!can_synapse_fallback(&dc, "ed25519.test_key", &cfg));
 
-        std::env::remove_var("CMN_HOME");
+        crate::env::remove_var("CMN_HOME");
     }
 
     #[test]
@@ -205,7 +205,7 @@ mod tests {
         cfg.require_domain_first_key = false;
         assert!(can_synapse_fallback(&dc, "ed25519.test_key", &cfg));
 
-        std::env::remove_var("CMN_HOME");
+        crate::env::remove_var("CMN_HOME");
     }
 
     #[test]
@@ -220,7 +220,7 @@ mod tests {
         assert!(cfg.require_domain_first_key);
         assert!(can_synapse_fallback(&dc, key, &cfg));
 
-        std::env::remove_var("CMN_HOME");
+        crate::env::remove_var("CMN_HOME");
     }
 
     #[test]
@@ -233,7 +233,7 @@ mod tests {
         let cfg = default_cache_config();
         assert!(!can_synapse_fallback(&dc, "ed25519.key_b", &cfg));
 
-        std::env::remove_var("CMN_HOME");
+        crate::env::remove_var("CMN_HOME");
     }
 
     #[test]
@@ -317,6 +317,6 @@ mod tests {
             "a later valid delivery should not inherit a toxic verdict"
         );
 
-        std::env::remove_var("CMN_HOME");
+        crate::env::remove_var("CMN_HOME");
     }
 }

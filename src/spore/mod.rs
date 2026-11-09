@@ -8,12 +8,12 @@ mod release;
 mod replicate;
 mod updated_at;
 
-use substrate::{SporeCore, SporeTree, SPORE_CORE_SCHEMA};
+use substrate::{SPORE_CORE_SCHEMA, SporeCore, SporeTree};
 
-pub use bond_sync::{handle_bond_sync, BOND_SYNC_DRIFT_EXIT_CODE};
+pub use bond_sync::{BOND_SYNC_DRIFT_EXIT_CODE, handle_bond_sync};
 pub use bonds::{handle_bond_clear, handle_bond_remove, handle_bond_set};
-pub use hatch::{handle_hatch, handle_tree_set, handle_tree_show, HatchArgs};
-pub use release::{handle_release, ArchiveFormat, ReleaseArgs};
+pub use hatch::{HatchArgs, handle_hatch, handle_tree_set, handle_tree_show};
+pub use release::{ArchiveFormat, ReleaseArgs, handle_release};
 pub use replicate::handle_replicate;
 
 fn default_hatch_tree() -> SporeTree {
@@ -54,7 +54,7 @@ fn load_draft() -> Result<(std::path::PathBuf, SporeCore), (String, String)> {
             return Err((
                 "dir_error".to_string(),
                 format!("Failed to get working directory: {}", e),
-            ))
+            ));
         }
     };
 
@@ -67,7 +67,7 @@ fn load_draft() -> Result<(std::path::PathBuf, SporeCore), (String, String)> {
                 return Err((
                     "spore_read_failed".to_string(),
                     format!("Failed to read {}: {}", spore_core_path.display(), e),
-                ))
+                ));
             }
         };
         match serde_json::from_str(&content) {
@@ -76,7 +76,7 @@ fn load_draft() -> Result<(std::path::PathBuf, SporeCore), (String, String)> {
                 return Err((
                     "spore_parse_failed".to_string(),
                     format!("Failed to parse {}: {}", spore_core_path.display(), e),
-                ))
+                ));
             }
         }
     } else {
@@ -155,12 +155,18 @@ pub fn write_spore_core(
             format!("Failed to format spore.core.json: {}", e),
         )
     })?;
-    std::fs::write(path, &pretty).map_err(|e| {
-        HyphaError::new(
-            "spore_write_failed",
-            format!("Failed to write spore.core.json: {}", e),
-        )
-    })?;
+    let temporary_dir = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join(".cmn");
+    crate::cache::fs::atomic_write_file(path, pretty.as_bytes(), &temporary_dir, Some(0o644))
+        .map_err(|e| {
+            HyphaError::new(
+                "spore_write_failed",
+                format!("Failed to write spore.core.json: {}", e),
+            )
+        })?;
     Ok(())
 }
 
@@ -222,5 +228,62 @@ mod tests {
 
         let err = write_spore_core(&path, &value).unwrap_err();
         assert!(err.message.contains("spore.core.json $schema must be"));
+    }
+
+    #[test]
+    fn draft_staging_stays_out_of_default_tree_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("spore.core.json");
+        let mut draft = create_default_spore_core(dir.path());
+        draft.domain = "example.com".to_string();
+        let value = serde_json::to_value(&draft).unwrap();
+        write_spore_core(&path, &value).unwrap();
+        assert!(dir.path().join(".cmn").is_dir());
+        assert_eq!(
+            std::fs::read_dir(dir.path().join(".cmn")).unwrap().count(),
+            0
+        );
+
+        let before = crate::tree::compute_tree_hash(dir.path(), &draft.tree).unwrap();
+        // Simulate a leftover temporary file after a process interruption.
+        std::fs::write(dir.path().join(".cmn/.hypha-write-interrupted"), "partial").unwrap();
+        write_spore_core(&path, &value).unwrap();
+        assert_eq!(
+            crate::tree::compute_tree_hash(dir.path(), &draft.tree).unwrap(),
+            before
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_draft_writer_preserves_mode_and_refuses_symlink() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("spore.core.json");
+        let mut draft = create_default_spore_core(dir.path());
+        draft.domain = "example.com".to_string();
+        let value = serde_json::to_value(&draft).unwrap();
+        write_spore_core(&path, &value).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        write_spore_core(&path, &value).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        let original = std::fs::read(&path).unwrap();
+        let real_path = dir.path().join("real.json");
+        std::fs::rename(&path, &real_path).unwrap();
+        symlink(&real_path, &path).unwrap();
+        assert_eq!(
+            write_spore_core(&path, &value).unwrap_err().code,
+            "spore_write_failed"
+        );
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read(&real_path).unwrap(), original);
     }
 }

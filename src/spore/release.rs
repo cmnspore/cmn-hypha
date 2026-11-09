@@ -2,13 +2,13 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use crate::HyphaError;
 use crate::api::Output;
 use crate::auth;
 use crate::site::{self, SiteDir};
-use crate::HyphaError;
 use substrate::{
-    BondRelation, PrettyJson, Spore, SporeBond, SporeCapsule, SporeCore, SPORE_CORE_SCHEMA,
-    SPORE_SCHEMA,
+    BondRelation, PrettyJson, SPORE_CORE_SCHEMA, SPORE_SCHEMA, Spore, SporeBond, SporeCapsule,
+    SporeCore,
 };
 
 use super::read_spawned_from_uri;
@@ -87,7 +87,7 @@ pub(crate) fn build_release_plan(
         return Err(HyphaError::with_hint(
             "NO_SITE",
             format!("Site not found at {}", site.root.display()),
-            format!("run: hypha mycelium root --domain {}", domain),
+            format!("run: hypha mycelium root {}", domain),
         ));
     }
 
@@ -356,77 +356,14 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
         });
     }
 
-    // Scenario B: Archive (always generated) + optional delta
-    {
-        let mut files = substrate::flatten_entries(&entries);
-
-        let archive_filename = format!("{}.{}", filename, archive_format.extension());
-        let archive_dir = site.archive_dir();
-        if let Err(e) = std::fs::create_dir_all(&archive_dir) {
-            return out.error("dir_error", &format!("Failed to create archive dir: {}", e));
-        }
-        let archive_path = archive_dir.join(&archive_filename);
-
-        // Create archive directly from in-memory file list (optimized)
-        if let Err(e) = create_archive_from_files(&mut files, &archive_path, archive_format) {
-            return out.error("archive_error", &format!("Failed to create archive: {}", e));
-        }
-
-        // Generate delta archive if previous version exists.
-        if let Some(old_hash) = find_previous_hash(&site, domain, &draft.id) {
-            if old_hash != uri_hash {
-                let old_archive_path = archive_dir.join(format!("{}.tar.zst", old_hash));
-                if old_archive_path.exists() {
-                    match generate_delta_archive(
-                        &mut files,
-                        &old_archive_path,
-                        &archive_dir,
-                        &uri_hash,
-                        &old_hash,
-                    ) {
-                        Ok(_delta_filename) => {}
-                        Err(e) => {
-                            // Delta is optional — warn but continue
-                            out.warn(
-                                "DELTA_WARN",
-                                &format!("Failed to generate delta archive: {}", e),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        dist.push(substrate::SporeDist {
-            kind: substrate::DistKind::Archive,
-            filename: None,
-            url: None,
-            git_ref: None,
-            cid: None,
-            extra: Default::default(),
-        });
-    }
-
-    // 6. Build capsule with dist
-    let capsule = SporeCapsule {
-        uri: uri.clone(),
-        core,
-        core_signature,
-        dist,
-    };
-
-    // 7. Sign capsule → capsule_signature
-    let capsule_signature = match auth::sign_json_with_site(&site, &capsule) {
-        Ok(sig) => sig,
-        Err(auth::JsonSignError::Jcs(message)) => return out.error("jcs_error", &message),
-        Err(auth::JsonSignError::Sign(err)) => return out.error_from("sign_error", &err),
-    };
-
-    // 8. Check if spore already exists with same hash
+    let archive_filename = format!("{}.{}", filename, archive_format.extension());
+    let archive_dir = site.archive_dir();
+    let archive_path = archive_dir.join(&archive_filename);
     let spore_manifest_path = site.spores_dir().join(format!("{}.json", filename));
 
-    if spore_manifest_path.exists() {
-        // Spore with same hash already exists - skip
+    // Check if spore already exists with same hash and archive is intact
+    if archive_path.exists() && spore_manifest_path.exists() {
+        // Spore with same hash already exists - skip heavy archive creation
         let existing_json = match std::fs::read_to_string(&spore_manifest_path) {
             Ok(j) => j,
             Err(e) => {
@@ -465,7 +402,70 @@ pub fn handle_release(out: &Output, args: ReleaseArgs<'_>) -> ExitCode {
         return out.ok_trace(&data, hypha);
     }
 
-    // 9. Build complete spore manifest
+    // Scenario B: Archive (always generated) + optional delta
+    {
+        let mut files = substrate::flatten_entries(&entries);
+
+        if let Err(e) = std::fs::create_dir_all(&archive_dir) {
+            return out.error("dir_error", &format!("Failed to create archive dir: {}", e));
+        }
+
+        // Create archive directly from in-memory file list (optimized)
+        if let Err(e) = create_archive_from_files(&mut files, &archive_path, archive_format) {
+            return out.error("archive_error", &format!("Failed to create archive: {}", e));
+        }
+
+        // Generate delta archive if previous version exists.
+        if let Some(old_hash) = find_previous_hash(&site, domain, &draft.id)
+            && old_hash != uri_hash
+        {
+            let old_archive_path = archive_dir.join(format!("{}.tar.zst", old_hash));
+            if old_archive_path.exists() {
+                match generate_delta_archive(
+                    &mut files,
+                    &old_archive_path,
+                    &archive_dir,
+                    &uri_hash,
+                    &old_hash,
+                ) {
+                    Ok(_delta_filename) => {}
+                    Err(e) => {
+                        // Delta is optional — warn but continue
+                        out.warn(
+                            "DELTA_WARN",
+                            &format!("Failed to generate delta archive: {}", e),
+                        );
+                    }
+                }
+            }
+        }
+
+        dist.push(substrate::SporeDist {
+            kind: substrate::DistKind::Archive,
+            filename: None,
+            url: None,
+            git_ref: None,
+            cid: None,
+            extra: Default::default(),
+        });
+    }
+
+    // 6. Build capsule with dist
+    let capsule = SporeCapsule {
+        uri: uri.clone(),
+        core,
+        core_signature,
+        dist,
+    };
+
+    // 7. Sign capsule → capsule_signature
+    let capsule_signature = match auth::sign_json_with_site(&site, &capsule) {
+        Ok(sig) => sig,
+        Err(auth::JsonSignError::Jcs(message)) => return out.error("jcs_error", &message),
+        Err(auth::JsonSignError::Sign(err)) => return out.error_from("sign_error", &err),
+    };
+
+    // 8. Build complete spore manifest
     let spore_manifest = Spore {
         schema: SPORE_SCHEMA.to_string(),
         capsule,

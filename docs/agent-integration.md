@@ -98,6 +98,19 @@ ordering, `$schema`, and — for `sync` — internally resolved URIs). Use
 whole relation's bonds to a declarative spec in one call instead of hand
 diffing `set`/`remove` calls; see `docs/cli.md` for the spec format.
 
+The spec is an ordered JSON array of `{id, domain?, reason?, with?, uri?}` objects.
+An entry without `uri` resolves `id` on its own `domain`, or on `--domain` when it
+names none. Each domain's mycelium inventory is read from `--site DOMAIN=PATH`
+(repeat per domain; `--site-path` covers `--domain`), else from the default site,
+so a dependency published from another repository resolves from that
+repository's checked-out site. `with` replaces the existing object and keeps JSON types; bare `bond set --with
+KEY=VALUE` values are strings. Sync matches by URI, then id, within the selected
+relation. Other relations retain their object values and relative order; a desired
+URI already in another relation returns `bond_relation_conflict` (exit 1) in both
+normal and check mode, without writing. `--check` exits 7 whenever applying sync
+would change the `bonds` array. Pure order or group-position changes set
+`reordered=true` while `to_add`, `to_update`, and `to_remove` remain empty.
+
 ## 2. Skill Templates
 
 Ready-to-use prompt templates for orchestrating Hypha from an agent. `{SYNAPSE_URL}` can be any Synapse instance — a public one or one you run yourself (see [Deploying Synapse](/tools/synapse/synapse-deployment/)).

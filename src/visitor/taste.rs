@@ -558,7 +558,7 @@ async fn share_taste_report_lib(
             format!("Failed to create HTTP client: {}", e),
         )
     })?;
-    let opts = fetch_opts(synapse_token_secret);
+    let opts = fetch_opts(synapse_token_secret)?;
     substrate::client::post_synapse_pulse(&client, synapse_url, &payload_value, opts)
         .await
         .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;
@@ -578,7 +578,7 @@ async fn fetch_taste_reports(
             format!("Failed to create HTTP client: {}", e),
         )
     })?;
-    substrate::client::fetch_taste_reports(&client, synapse_url, hash, fetch_opts(token_secret))
+    substrate::client::fetch_taste_reports(&client, synapse_url, hash, fetch_opts(token_secret)?)
         .await
         .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))
 }

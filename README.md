@@ -198,7 +198,7 @@ response; use `hypha --docs` when an agent needs the whole registry.
 
 | Document | Description |
 |----------|-------------|
-| [docs/cli.md](docs/cli.md) | Generated command reference from `src/cli.rs` |
+| [docs/cli.md](docs/cli.md) | Generated command reference from `src/cli/spec.rs` |
 | [docs/quickstart.md](docs/quickstart.md) | Install and first commands |
 | [docs/releasing.md](docs/releasing.md) | Publishing flow and distribution options |
 | [docs/evolution.md](docs/evolution.md) | Spawn, grow, absorb, bond, and lineage workflows |

@@ -67,7 +67,7 @@ pub fn execute(cli: Cli) -> ExitCode {
             return emit_preflight_cli_error(
                 &message,
                 "use --output json, --output yaml, or --output plain",
-            )
+            );
         }
     };
     let output_to = match agent_first_data::OutputTo::parse(&cli.output_to) {
@@ -76,7 +76,7 @@ pub fn execute(cli: Cli) -> ExitCode {
             return emit_preflight_cli_error(
                 &message,
                 "use --output-to split, --output-to stdout, or --output-to stderr",
-            )
+            );
         }
     };
 
@@ -200,8 +200,11 @@ pub fn execute(cli: Cli) -> ExitCode {
                     spec,
                     domain,
                     site_path,
+                    sites,
                     check,
-                } => spore::handle_bond_sync(&out, relation, &spec, domain, site_path, check),
+                } => {
+                    spore::handle_bond_sync(&out, relation, &spec, domain, site_path, &sites, check)
+                }
             },
             Some(HatchCommands::Tree { command }) => match command {
                 HatchTreeCommands::Set {

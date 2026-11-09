@@ -1,6 +1,6 @@
 use crate::auth;
 use crate::site::SiteDir;
-use substrate::{build_mycelium_uri, CmnCapsuleEntry, CmnEndpoint, CmnEntry, Mycelium};
+use substrate::{CmnCapsuleEntry, CmnEndpoint, CmnEntry, Mycelium, build_mycelium_uri};
 
 mod format;
 mod init;
@@ -113,6 +113,29 @@ fn sign_and_save_mycelium(
         format_mycelium(&mycelium_value).map_err(|e| MyceliumError::Format(e.to_string()))?;
     std::fs::write(&mycelium_file, &mycelium_json)?;
 
+    let existing_capsule = std::fs::read_to_string(site.cmn_json_path())
+        .ok()
+        .and_then(|content| serde_json::from_str::<CmnEntry>(&content).ok())
+        .and_then(|entry| entry.primary_capsule().ok().cloned());
+
+    // Clean up old mycelium files — keep only previous and current
+    let previous_hash = existing_capsule
+        .as_ref()
+        .and_then(|c| c.mycelium_hash().map(|s| s.to_string()))
+        .unwrap_or_default();
+    if let Ok(entries) = std::fs::read_dir(&mycelium_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.ends_with(".json") {
+                let stem = name_str.trim_end_matches(".json");
+                if stem != mycelium_hash && stem != previous_hash {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+
     let endpoints = endpoints
         .into_iter()
         .map(|mut endpoint| {
@@ -122,10 +145,6 @@ fn sign_and_save_mycelium(
             endpoint
         })
         .collect();
-    let existing_capsule = std::fs::read_to_string(site.cmn_json_path())
-        .ok()
-        .and_then(|content| serde_json::from_str::<CmnEntry>(&content).ok())
-        .and_then(|entry| entry.primary_capsule().ok().cloned());
     let serial = existing_capsule
         .as_ref()
         .map(|capsule| capsule.serial.saturating_add(1))

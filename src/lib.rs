@@ -3,6 +3,7 @@ pub mod auth;
 pub mod cache;
 pub mod cli;
 pub mod config;
+mod env;
 pub mod git;
 pub mod mycelium;
 pub mod output;

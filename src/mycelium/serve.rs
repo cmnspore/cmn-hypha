@@ -52,7 +52,7 @@ pub async fn handle_pulse(
             return out.error(
                 "read_error",
                 &format!("Failed to read {}: {}", file_path, e),
-            )
+            );
         }
     };
 
@@ -80,8 +80,12 @@ pub async fn handle_pulse(
         Err(e) => return out.error("NETWORK_ERR", &format!("HTTP client error: {}", e)),
     };
     let opts = match &resolved.token_secret {
-        Some(token_secret) => substrate::client::FetchOptions::with_bearer_token(token_secret)
-            .max_bytes(JSON_FETCH_MAX_BYTES),
+        Some(token_secret) => {
+            match substrate::client::FetchOptions::with_bearer_token(token_secret) {
+                Ok(opts) => opts.max_bytes(JSON_FETCH_MAX_BYTES),
+                Err(e) => return out.error("NETWORK_ERR", &e.to_string()),
+            }
+        }
         None => substrate::client::FetchOptions::with_max_bytes(JSON_FETCH_MAX_BYTES),
     };
 
@@ -104,12 +108,11 @@ pub fn handle_serve(
     use tiny_http::{Header, Response, Server};
 
     // Resolve site directory
-    if site_path.is_none() {
-        if let Some(d) = domain {
-            if let Err(e) = site::validate_site_domain_path(d) {
-                return out.error_hypha(&e);
-            }
-        }
+    if site_path.is_none()
+        && let Some(d) = domain
+        && let Err(e) = site::validate_site_domain_path(d)
+    {
+        return out.error_hypha(&e);
     }
 
     let (site, domain): (SiteDir, String) = if let Some(path) = site_path {
@@ -124,7 +127,7 @@ pub fn handle_serve(
             return out.error_hint(
                 "NO_SITE",
                 "No site found",
-                Some("run: hypha mycelium root --domain <DOMAIN>"),
+                Some("run: hypha mycelium root <DOMAIN>"),
             );
         }
         let d = domains[0].clone();

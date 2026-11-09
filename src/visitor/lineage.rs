@@ -66,7 +66,7 @@ async fn lineage_direction(
         hash,
         direction,
         max_depth,
-        fetch_opts(resolved.token_secret.as_deref()),
+        fetch_opts(resolved.token_secret.as_deref())?,
     )
     .await
     .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))?;

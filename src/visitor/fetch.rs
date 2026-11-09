@@ -21,11 +21,14 @@ pub(super) fn json_fetch_opts() -> substrate::client::FetchOptions {
 }
 
 /// Build FetchOptions with an optional Bearer secret.
-pub(super) fn fetch_opts(token_secret: Option<&str>) -> substrate::client::FetchOptions {
+pub(super) fn fetch_opts(
+    token_secret: Option<&str>,
+) -> Result<substrate::client::FetchOptions, crate::HyphaError> {
     match token_secret {
         Some(token_secret) => substrate::client::FetchOptions::with_bearer_token(token_secret)
-            .max_bytes(JSON_FETCH_MAX_BYTES),
-        None => json_fetch_opts(),
+            .map(|opts| opts.max_bytes(JSON_FETCH_MAX_BYTES))
+            .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string())),
+        None => Ok(json_fetch_opts()),
     }
 }
 
@@ -67,7 +70,7 @@ async fn acquire_spore_cache_lock(
                 return Err(crate::HyphaError::new(
                     "cache_lock_failed",
                     format!("Failed to lock spore cache: {}", e),
-                ))
+                ));
             }
         }
     }
@@ -136,7 +139,7 @@ pub(super) async fn fetch_bonds(
         hash,
         direction,
         max_depth,
-        fetch_opts(token_secret),
+        fetch_opts(token_secret)?,
     )
     .await
     .map_err(|e| crate::HyphaError::new("synapse_error", e.to_string()))

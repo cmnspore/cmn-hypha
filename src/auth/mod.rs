@@ -5,7 +5,7 @@ use rand::RngExt;
 use serde::Serialize;
 use std::fs;
 use substrate::{
-    compute_signature, format_key, format_signature, KeyAlgorithm, SignatureAlgorithm,
+    KeyAlgorithm, SignatureAlgorithm, compute_signature, format_key, format_signature,
 };
 use zeroize::Zeroize;
 
@@ -29,9 +29,15 @@ pub enum JsonSignError {
 }
 
 pub fn init_identity_with_site(domain: &str, site: &SiteDir) -> anyhow::Result<IdentityInfo> {
-    // Create directories
     site.create_dirs()?;
+    crate::cache::fs::with_dir_lock(&site.keys, || {
+        init_identity_locked(domain, site)
+            .map_err(|e| crate::HyphaError::new("identity_init_failed", e.to_string()))
+    })
+    .map_err(anyhow::Error::from)
+}
 
+fn init_identity_locked(domain: &str, site: &SiteDir) -> anyhow::Result<IdentityInfo> {
     let newly_created = !site.private_key_path().exists();
     let verifying_key = if !newly_created {
         // Identity already exists — load it (with the same permission check the
@@ -52,21 +58,12 @@ pub fn init_identity_with_site(domain: &str, site: &SiteDir) -> anyhow::Result<I
             .to_pkcs8_pem(ed25519_dalek::pkcs8::spki::der::pem::LineEnding::LF)
             .map_err(|e| anyhow::anyhow!("Failed to encode private key: {}", e))?;
 
-        // Write with 0o600 from creation to avoid transient world-readable window
-        #[cfg(unix)]
-        {
-            use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut f = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&private_key_path)?;
-            f.write_all(private_pem.as_bytes())?;
-        }
-        #[cfg(not(unix))]
-        fs::write(&private_key_path, private_pem.as_bytes())?;
+        crate::cache::fs::atomic_write_file(
+            &private_key_path,
+            private_pem.as_bytes(),
+            &site.keys.join(".cmn"),
+            Some(0o600),
+        )?;
 
         verifying_key
     };
@@ -76,7 +73,12 @@ pub fn init_identity_with_site(domain: &str, site: &SiteDir) -> anyhow::Result<I
     let public_pem = verifying_key
         .to_public_key_pem(ed25519_dalek::pkcs8::spki::der::pem::LineEnding::LF)
         .map_err(|e| anyhow::anyhow!("Failed to encode public key: {}", e))?;
-    fs::write(site.public_key_path(), &public_pem)?;
+    crate::cache::fs::atomic_write_file(
+        &site.public_key_path(),
+        public_pem.as_bytes(),
+        &site.keys.join(".cmn"),
+        Some(0o644),
+    )?;
 
     Ok(IdentityInfo {
         domain: domain.to_string(),
@@ -157,4 +159,87 @@ fn sign_ed25519(signing_key: &SigningKey, data: &[u8]) -> anyhow::Result<String>
         SignatureAlgorithm::Ed25519,
         &signature.to_bytes(),
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+
+    #[test]
+    fn identity_init_subprocess() {
+        let Some(root) = std::env::var_os("CMN_HYPHA_TEST_IDENTITY_SITE") else {
+            return;
+        };
+        let result_path = std::env::var_os("CMN_HYPHA_TEST_IDENTITY_RESULT").unwrap();
+        let mut start = [0];
+        std::io::stdin().read_exact(&mut start).unwrap();
+        let site = SiteDir::with_path(root.into());
+        let identity = init_identity_with_site("example.com", &site).unwrap();
+        std::fs::write(result_path, serde_json::to_vec(&identity).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn concurrent_init_keeps_one_identity_and_matching_keypair() {
+        let root = tempfile::tempdir().unwrap();
+        let site = SiteDir::with_path(root.path().join("site"));
+        let mut children = Vec::new();
+        let mut result_paths = Vec::new();
+        for index in 0..2 {
+            let result_path = root.path().join(format!("identity-{index}.json"));
+            let child = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "auth::tests::identity_init_subprocess"])
+                .env("CMN_HYPHA_TEST_IDENTITY_SITE", &site.root)
+                .env("CMN_HYPHA_TEST_IDENTITY_RESULT", &result_path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            children.push(child);
+            result_paths.push(result_path);
+        }
+        for child in &mut children {
+            child.stdin.take().unwrap().write_all(b"1").unwrap();
+        }
+        for child in children {
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let identities: Vec<serde_json::Value> = result_paths
+            .iter()
+            .map(|path| serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap())
+            .collect();
+        assert_eq!(identities[0]["public_key"], identities[1]["public_key"]);
+        assert_ne!(
+            identities[0]["newly_created"],
+            identities[1]["newly_created"]
+        );
+        let private = std::fs::read(site.private_key_path()).unwrap();
+        let repeated = init_identity_with_site("example.com", &site).unwrap();
+        assert!(!repeated.newly_created);
+        assert_eq!(std::fs::read(site.private_key_path()).unwrap(), private);
+        assert_eq!(
+            load_signing_key_with_site(&site).unwrap().verifying_key(),
+            VerifyingKey::from_public_key_pem(
+                &std::fs::read_to_string(site.public_key_path()).unwrap()
+            )
+            .unwrap()
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            std::fs::metadata(site.private_key_path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
 }

@@ -239,6 +239,7 @@ pub enum HatchBondCommands {
         spec: String,
         domain: Option<String>,
         site_path: Option<String>,
+        sites: Vec<String>,
         check: bool,
     },
 }

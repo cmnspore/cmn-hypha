@@ -11,9 +11,9 @@ use std::process::ExitCode;
 use serde_json::json;
 use substrate::{CmnEndpoint, Mycelium, Spore};
 
+use crate::HyphaError;
 use crate::api::Output;
 use crate::site::{self, SiteDir};
-use crate::HyphaError;
 
 use super::{load_existing_mycelium, resolve_spore_ref, sign_and_save_mycelium};
 
@@ -44,14 +44,14 @@ fn load_site_for_spore_op(
                         "no_site",
                         "No mycelium sites found",
                         "run `hypha mycelium root ...` first, or pass --site-path",
-                    ))
+                    ));
                 }
                 _ => {
                     return Err(HyphaError::with_hint(
                         "ambiguous_domain",
                         "Multiple mycelium sites found",
                         "pass --domain <DOMAIN> or --site-path <PATH>",
-                    ))
+                    ));
                 }
             }
         }
@@ -171,7 +171,7 @@ pub fn handle_spore_unyank(
                     site.spores_dir().display()
                 ),
                 Some("it may have been yanked with --purge; re-run `hypha release` to republish"),
-            )
+            );
         }
         Err(e) => return out.error_hypha(&e),
     };

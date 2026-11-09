@@ -15,7 +15,8 @@
     "Harden atomic bond updates and enforce conformance checks",
     "Align CMN search behavior, skills and documentation",
     "Fix protocol, security and documentation issues",
-    "Upgrade dependencies: agent-first-data 0.37, cmn-substrate 0.5, agent-first-slug 0.9.1"
+    "Upgrade dependencies: agent-first-data 0.37, cmn-substrate 0.5, agent-first-slug 0.9.1",
+    "Add a CI workflow"
   ],
   "bonds": [
     {
